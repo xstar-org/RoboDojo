@@ -253,13 +253,12 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             self.episode_nums -= len(unstable_envs)
             if not success or self.episode_nums <= 0:
                 raise UnStableError("All scene Unstable Error!")
-            for _ in range(10):
-                self.render()
-            for idx in range(200):
-                self.sim_step()
-                if idx % 5 == 0:
-                    self.obs_manager.render_for_capture()
-                    self.obs_manager.get_obs()
+            # Let the scene settle without spending RTX work on intermediate
+            # states. Only the final camera frame is consumed by the policy.
+            for _ in range(200):
+                self.sim_step(render=False)
+            self.obs_manager.render_for_capture()
+            self.obs_manager.get_obs()
             if self.physx_monitor_enabled:
                 self._check_physx_broken_envs()
 
@@ -462,7 +461,7 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 if hasattr(self, "check_support_arm_stable"):
                     for env_idx in env_idx_list:
                         self.check_support_arm_stable(env_idx=env_idx)
-            self.is_episode_end()
+            return self.is_episode_end()
 
         def mark_env_unstable(self, env_idx):
             """Flag an env as unstable so run_eval drops it from the eval set.

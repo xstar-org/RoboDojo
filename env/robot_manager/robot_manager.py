@@ -360,51 +360,105 @@ class RobotManager:
         sim = self.sim.sim
         scene = self.scene
         num_envs = scene.num_envs
-        plan_num, plan_lst = 0, []
-        for env_idx in range(num_envs):
-            if isinstance(meta_control_list[env_idx], MetaControl):
-                plan_num += 1
-                plan_lst.append(env_idx)
+        plan_lst = [
+            env_idx
+            for env_idx in range(num_envs)
+            if isinstance(meta_control_list[env_idx], MetaControl)
+        ]
+        if not plan_lst:
+            return
+
+        env_ids_long = torch.as_tensor(plan_lst, dtype=torch.long, device=sim.device)
+        env_ids = env_ids_long.to(dtype=torch.int32)
         for robot in self.robot_list:
-            if robot.robot_type == "arm":
-                action_dim = len(robot.arm_joint_indices)
-                gripper_dim = len(robot.gripper_joint_indices)
-                arm = self.robot_key[self.robot_list.index(robot)]
-                arm_position = torch.zeros((plan_num, action_dim), device=sim.device, dtype=torch.float32)
-                arm_velocity = torch.zeros((plan_num, action_dim), device=sim.device, dtype=torch.float32)
-                gripper_position = torch.zeros((plan_num, gripper_dim), device=sim.device, dtype=torch.float32)
+            if robot.robot_type != "arm":
+                continue
 
-                for id, env_idx in enumerate(plan_lst):
-                    meta_control = meta_control_list[env_idx].get_action(
-                        self,
-                        env_idx=env_idx,
-                    )  # get action dict
-                    arm_position[id] = torch.tensor(
-                        meta_control[self.process_name(robot.arm_name)]["position"],
-                        device=sim.device,
-                        dtype=torch.float32,
-                    )
-                    arm_velocity[id] = torch.tensor(
-                        meta_control[self.process_name(robot.arm_name)]["velocity"],
-                        device=sim.device,
-                        dtype=torch.float32,
-                    )
-                    gripper_position[id][:] = torch.tensor(
-                        meta_control[self.process_name(robot.gripper_name)]["position"],
-                        device=sim.device,
-                        dtype=torch.float32,
-                    )
+            arm_key = self.process_name(robot.arm_name)
+            gripper_key = self.process_name(robot.gripper_name)
+            controls = [meta_control_list[env_idx].control_info_dict for env_idx in plan_lst]
+            arm_dim = len(robot.arm_joint_indices)
+            gripper_dim = len(robot.gripper_joint_indices)
 
-                env_ids = torch.tensor(plan_lst, dtype=torch.int32, device=arm_velocity.device)
-                arm.set_joint_position_target(arm_position, joint_ids=robot.arm_joint_indices, env_ids=env_ids)  # arm
-                arm.set_joint_velocity_target(arm_velocity, joint_ids=robot.arm_joint_indices, env_ids=env_ids)  # arm
-                arm.set_joint_position_target(
-                    gripper_position,
-                    joint_ids=robot.gripper_joint_indices,
-                    env_ids=env_ids,
-                )  # gripper
+            arm_position = torch.as_tensor(
+                np.asarray(
+                    [
+                        np.broadcast_to(
+                            np.asarray(control[arm_key]["position"], dtype=np.float32),
+                            (arm_dim,),
+                        )
+                        for control in controls
+                    ],
+                    dtype=np.float32,
+                ),
+                device=sim.device,
+            )
+            arm_velocity = torch.as_tensor(
+                np.asarray(
+                    [
+                        np.broadcast_to(
+                            np.asarray(control[arm_key].get("velocity", 0), dtype=np.float32),
+                            (arm_dim,),
+                        )
+                        for control in controls
+                    ],
+                    dtype=np.float32,
+                ),
+                device=sim.device,
+            )
+
+            arm = self.robot_key[self.robot_list.index(robot)]
+            if robot.ee_type == "gripper" and gripper_dim == 2:
+                # MetaControl.get_action used to read each environment back to
+                # the CPU to limit gripper motion.  Apply the identical clamp
+                # to the whole batch on the simulation device instead.
+                desired_first = torch.as_tensor(
+                    np.asarray(
+                        [control[gripper_key]["position"][0] for control in controls],
+                        dtype=np.float32,
+                    ),
+                    device=sim.device,
+                )
+                current_first = arm.data.joint_pos[env_ids_long, robot.gripper_joint_indices[0]]
+                max_delta = float(robot.gripper_scale[1] - robot.gripper_scale[0]) * 0.2
+                first = current_first + torch.clamp(
+                    desired_first - current_first,
+                    min=-max_delta,
+                    max=max_delta,
+                )
+                mimic = robot.gripper_move["mimic"]
+                second = first * float(mimic[1]) + float(mimic[2])
+                gripper_position = torch.stack((first, second), dim=-1)
             else:
-                pass
+                gripper_position = torch.as_tensor(
+                    np.asarray(
+                        [
+                            np.broadcast_to(
+                                np.asarray(control[gripper_key]["position"], dtype=np.float32),
+                                (gripper_dim,),
+                            )
+                            for control in controls
+                        ],
+                        dtype=np.float32,
+                    ),
+                    device=sim.device,
+                )
+
+            arm.set_joint_position_target(
+                arm_position,
+                joint_ids=robot.arm_joint_indices,
+                env_ids=env_ids,
+            )
+            arm.set_joint_velocity_target(
+                arm_velocity,
+                joint_ids=robot.arm_joint_indices,
+                env_ids=env_ids,
+            )
+            arm.set_joint_position_target(
+                gripper_position,
+                joint_ids=robot.gripper_joint_indices,
+                env_ids=env_ids,
+            )
 
     def _trans_from_endlink_to_gripper(self, target_pose, robot):
         inv_delta_matrix = robot.inv_delta_matrix

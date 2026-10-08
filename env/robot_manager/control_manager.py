@@ -119,15 +119,27 @@ class ControlManager:  # Control sequences for all environments
             env_idx_list = list(range(self.num_envs))
         empty_queue_list = self.get_empty(env_idx_list)
         assert len(empty_queue_list) == 0, f"[ERROR] Empty Control Queue: {empty_queue_list}"
+        active_envs = set(env_idx_list)
+        obs_list = self.robot_manager.get_robot_obs_name()
         res = []
         for env_idx in range(self.num_envs):
-            if env_idx not in env_idx_list:
-                meta_ctrl = []
-            else:
-                meta_ctrl = self.control_queue[env_idx].pop()
-                meta_ctrl = self.update_current_missing_ctrl_info(env_idx, meta_ctrl)
-                self.update_prev_control(env_idx, meta_ctrl)
-            res.append(meta_ctrl)
+            if env_idx not in active_envs:
+                res.append([])
+                continue
+
+            # Resolve and clamp each control once.  The old path called
+            # MetaControl.get_action() in both update_current_missing_ctrl_info
+            # and update_prev_control, repeating simulator reads for every env.
+            meta_ctrl_dict = self.control_queue[env_idx].pop().get_action(
+                self.robot_manager,
+                env_idx,
+            )
+            for key in obs_list:
+                if meta_ctrl_dict[key] is None:
+                    meta_ctrl_dict[key] = self.prev_control[env_idx][key]
+                else:
+                    self.prev_control[env_idx][key] = meta_ctrl_dict[key]
+            res.append(MetaControl(meta_ctrl_dict))
         return res
 
     def reset(self):  # clean all queue
