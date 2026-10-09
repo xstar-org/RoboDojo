@@ -107,8 +107,10 @@ if [[ -n "${device_id}" ]]; then
   echo "[INFO] device_id = ${device_id} → CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 fi
 
+eval_batch_args=()
 if [[ -n "${eval_batch}" ]]; then
   echo "[INFO] eval_batch     = ${eval_batch}"
+  eval_batch_args=(--eval_batch "${eval_batch}")
 fi
 
 # Read render_interval / env.num_envs from yaml (fallback if missing)
@@ -153,6 +155,7 @@ while : ; do
     --policy_name "$policy_name" \
     --port "$port" \
     --protocol "$protocol" \
+    "${eval_batch_args[@]}" \
     --policy_server_url "$policy_server_url" \
     --additional_info "$additional_info" \
     --seed "$seed" \
