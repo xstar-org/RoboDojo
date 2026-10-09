@@ -143,7 +143,7 @@ MAX_BASH_RETRIES="${ROBODOJO_MAX_BASH_RETRIES:-10}"
 attempt=0
 while : ; do
   set +e
-  python -u src/eval_client/main.py \
+  "${ROBODOJO_ISAAC_LAUNCHER:-python3}" -u src/eval_client/main.py \
     --task_name "$task_name" \
     --env_cfg_type "$env_cfg_type" \
     --num_envs "$num_envs" \
