@@ -27,6 +27,12 @@ parser.add_argument(
 )
 parser.add_argument("--port", type=int, required=True, help="the port for the policy WebSocket server")
 parser.add_argument(
+    "--eval_batch",
+    choices=("true", "false"),
+    default=None,
+    help="Override deploy.yml eval_batch for this evaluation.",
+)
+parser.add_argument(
     "--host",
     type=str,
     default="localhost",
@@ -262,7 +268,11 @@ def main():
     eval_cfg["task_name"] = task_name
     eval_cfg["num_envs"] = num_envs
     eval_cfg["device_id"] = args_cli.device_id
-    eval_batch = _eval_batch_from_deploy(args_cli.policy_name)
+    eval_batch = (
+        _eval_batch_from_deploy(args_cli.policy_name)
+        if args_cli.eval_batch is None
+        else args_cli.eval_batch == "true"
+    )
     eval_cfg["eval_batch"] = eval_batch
     eval_cfg["policy_name"] = args_cli.policy_name
     eval_cfg["additional_info"] = args_cli.additional_info
