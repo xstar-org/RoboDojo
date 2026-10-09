@@ -322,6 +322,7 @@ def main():
         )
         num_envs = 1
     eval_cfg["num_envs"] = num_envs
+    OmegaConf.update(env_cfg, "sim.device", f"cuda:{args_cli.device_id}", force_add=True)
     OmegaConf.update(env_cfg, "sim.scene.num_envs", num_envs, force_add=True)
     OmegaConf.update(env_cfg, "eval_cfg.num_envs", num_envs, force_add=True)
     env_cfg = process_randomization(env_cfg)
