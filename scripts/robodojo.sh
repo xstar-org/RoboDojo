@@ -340,6 +340,7 @@ run_client() {
   local ckpt="external"
   local action_type="ee"
   local eval_num="${EVAL_NUM:-}"
+  local eval_batch="${EVAL_BATCH:-}"
   local connect_timeout="5"
   local only_tasks=""
   local tasks_file=""
@@ -363,6 +364,7 @@ run_client() {
       --ckpt) need_value "$@"; ckpt="$2"; shift 2 ;;
       --action-type) need_value "$@"; action_type="$2"; shift 2 ;;
       --eval-num) need_value "$@"; eval_num="$2"; shift 2 ;;
+      --eval-batch) need_value "$@"; eval_batch="$2"; shift 2 ;;
       --connect-timeout) need_value "$@"; connect_timeout="$2"; shift 2 ;;
       --only) need_value "$@"; only_tasks="$2"; shift 2 ;;
       --tasks-file) need_value "$@"; tasks_file="$2"; shift 2 ;;
@@ -407,6 +409,7 @@ Common options:
   --ckpt NAME            Checkpoint label recorded in result paths (default: external)
   --action-type NAME     Action type label recorded in result paths (default: ee)
   --connect-timeout SEC  Pre-flight policy-server reachability probe timeout (default: 5)
+  --eval-batch BOOL      Use the policy batched evaluation path (true/false)
   --only a,b,c           Batch mode task subset
   --tasks-file PATH      Batch mode task subset file
   --dimension NAMES      Batch mode capability dimensions
@@ -523,6 +526,9 @@ EOF
     --additional_info "${additional_info}"
     --seed "${seed}"
   )
+  if [[ -n "${eval_batch}" ]]; then
+    client_args+=(--eval_batch "${eval_batch}")
+  fi
 
   echo "[robodojo client] task=${task} policy=${policy_name} server=${policy_host}:${policy_port} eval_num=${EVAL_NUM:-default}"
 
