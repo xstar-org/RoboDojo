@@ -116,6 +116,9 @@ fi
 # Read render_interval / env.num_envs from yaml (fallback if missing)
 render_interval="$(python3 -c "import sys,yaml;print(yaml.safe_load(open(sys.argv[1])).get('render_interval',1))" "$sim_cfg_file")"
 num_envs="$(python3 -c "import sys,yaml;print(yaml.safe_load(open(sys.argv[1])).get('scene',{}).get('num_envs',1))" "$sim_cfg_file")"
+if [[ -n "${ROBODOJO_NUM_ENVS_OVERRIDE:-}" ]]; then
+  num_envs="${ROBODOJO_NUM_ENVS_OVERRIDE}"
+fi
 
 echo "[INFO] render_interval = ${render_interval}"
 echo "[INFO] num_envs        = ${num_envs}"
