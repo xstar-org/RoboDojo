@@ -232,8 +232,13 @@ class ArticulationObject(SingleArticulation):
     def initialize(self):
         self.physics_sim_view = SimulationManager.get_physics_sim_view()
         super().initialize(physics_sim_view=self.physics_sim_view)
-        self.upper_joint_positions = self.dof_properties["upper"].copy()
-        self.lower_joint_positions = self.dof_properties["lower"].copy()
+        dof_limits = self._articulation_view.get_dof_limits()[0]
+        if isinstance(dof_limits, torch.Tensor):
+            dof_limits = dof_limits.detach().cpu().numpy()
+        else:
+            dof_limits = np.asarray(dof_limits)
+        self.lower_joint_positions = dof_limits[:, 0].copy()
+        self.upper_joint_positions = dof_limits[:, 1].copy()
         self.initial_joint_positions = self.get_current_joint_positions()
         self.initial_drive_targets = self._capture_drive_targets()
         self.app = omni.kit.app.get_app()

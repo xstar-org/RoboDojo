@@ -875,6 +875,9 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             lazily on the first frame (when the resolution is known) and write
             to temporary files until the episode outcome decides the name.
             """
+            save_eval_videos = os.environ.get("ROBODOJO_SAVE_EVAL_VIDEOS", "true").strip().lower()
+            if save_eval_videos not in {"1", "true", "yes", "on"}:
+                return
             vision = frame.get("vision") if isinstance(frame, dict) else None
             if not vision:
                 return

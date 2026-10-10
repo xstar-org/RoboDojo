@@ -107,13 +107,18 @@ if [[ -n "${device_id}" ]]; then
   echo "[INFO] device_id = ${device_id} → CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 fi
 
+eval_batch_args=()
 if [[ -n "${eval_batch}" ]]; then
   echo "[INFO] eval_batch     = ${eval_batch}"
+  eval_batch_args=(--eval_batch "${eval_batch}")
 fi
 
 # Read render_interval / env.num_envs from yaml (fallback if missing)
 render_interval="$(python3 -c "import sys,yaml;print(yaml.safe_load(open(sys.argv[1])).get('render_interval',1))" "$sim_cfg_file")"
 num_envs="$(python3 -c "import sys,yaml;print(yaml.safe_load(open(sys.argv[1])).get('scene',{}).get('num_envs',1))" "$sim_cfg_file")"
+if [[ -n "${ROBODOJO_NUM_ENVS_OVERRIDE:-}" ]]; then
+  num_envs="${ROBODOJO_NUM_ENVS_OVERRIDE}"
+fi
 
 echo "[INFO] render_interval = ${render_interval}"
 echo "[INFO] num_envs        = ${num_envs}"
@@ -143,7 +148,7 @@ MAX_BASH_RETRIES="${ROBODOJO_MAX_BASH_RETRIES:-10}"
 attempt=0
 while : ; do
   set +e
-  python -u src/eval_client/main.py \
+  "${ROBODOJO_ISAAC_LAUNCHER:-python3}" -u src/eval_client/main.py \
     --task_name "$task_name" \
     --env_cfg_type "$env_cfg_type" \
     --num_envs "$num_envs" \
@@ -153,6 +158,7 @@ while : ; do
     --policy_name "$policy_name" \
     --port "$port" \
     --protocol "$protocol" \
+    "${eval_batch_args[@]}" \
     --policy_server_url "$policy_server_url" \
     --additional_info "$additional_info" \
     --seed "$seed" \

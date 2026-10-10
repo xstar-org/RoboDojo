@@ -27,6 +27,12 @@ parser.add_argument(
 )
 parser.add_argument("--port", type=int, required=True, help="the port for the policy WebSocket server")
 parser.add_argument(
+    "--eval_batch",
+    choices=("true", "false"),
+    default=None,
+    help="Override deploy.yml eval_batch for this evaluation.",
+)
+parser.add_argument(
     "--host",
     type=str,
     default="localhost",
@@ -257,12 +263,19 @@ def main():
     """
     task_name = args_cli.task_name
     num_envs = args_cli.num_envs
+    logical_device_id = int(
+        os.environ.get("ROBODOJO_LOGICAL_DEVICE_ID", args_cli.device_id)
+    )
     eval_cfg_name = args_cli.env_cfg_type
     eval_cfg = load_yaml(os.path.join(ENV_CONFIG_PATH, eval_cfg_name + ".yml"))
     eval_cfg["task_name"] = task_name
     eval_cfg["num_envs"] = num_envs
-    eval_cfg["device_id"] = args_cli.device_id
-    eval_batch = _eval_batch_from_deploy(args_cli.policy_name)
+    eval_cfg["device_id"] = logical_device_id
+    eval_batch = (
+        _eval_batch_from_deploy(args_cli.policy_name)
+        if args_cli.eval_batch is None
+        else args_cli.eval_batch == "true"
+    )
     eval_cfg["eval_batch"] = eval_batch
     eval_cfg["policy_name"] = args_cli.policy_name
     eval_cfg["additional_info"] = args_cli.additional_info
@@ -322,7 +335,7 @@ def main():
         )
         num_envs = 1
     eval_cfg["num_envs"] = num_envs
-    OmegaConf.update(env_cfg, "sim.device", f"cuda:{args_cli.device_id}", force_add=True)
+    OmegaConf.update(env_cfg, "sim.device", f"cuda:{logical_device_id}", force_add=True)
     OmegaConf.update(env_cfg, "sim.scene.num_envs", num_envs, force_add=True)
     OmegaConf.update(env_cfg, "eval_cfg.num_envs", num_envs, force_add=True)
     env_cfg = process_randomization(env_cfg)

