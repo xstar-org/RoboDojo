@@ -253,13 +253,14 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             self.episode_nums -= len(unstable_envs)
             if not success or self.episode_nums <= 0:
                 raise UnStableError("All scene Unstable Error!")
-            for _ in range(10):
-                self.render()
-            for idx in range(200):
-                self.sim_step()
-                if idx % 5 == 0:
-                    self.obs_manager.render_for_capture()
-                    self.obs_manager.get_obs()
+            # Let the scene settle without intermediate rendering/camera reads.
+            # On Isaac Sim 5.1, repeated multi-env camera captures during
+            # settling can leave wrist-camera frames black. Capture once from
+            # the final settled state before the first policy observation.
+            for _ in range(200):
+                self.sim_step(render=False)
+            self.obs_manager.render_for_capture()
+            self.obs_manager.get_obs()
             if self.physx_monitor_enabled:
                 self._check_physx_broken_envs()
 
