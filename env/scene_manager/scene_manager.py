@@ -668,7 +668,12 @@ class SceneManager:
             obj: Object instance to delete
         """
         if self.device.type == "cuda":
-            if isinstance(obj, GarmentObject):
+            # PhysX GPU tensor views keep references to rigid, geometry, and
+            # articulation prims. Deleting any of those prims invalidates the
+            # shared simulation view, so park reusable objects offscreen.
+            if isinstance(obj, (RigidObject, GeometryObject, ArticulationObject)):
+                obj.relocate_offscreen()
+            elif isinstance(obj, GarmentObject):
                 if hasattr(obj, "usd_prim_path") and is_prim_path_valid(obj.usd_prim_path):
                     delete_prim(obj.usd_prim_path)
             elif isinstance(obj, FluidObject):
@@ -682,8 +687,6 @@ class SceneManager:
                     and is_prim_path_valid(obj.container_prim_path)
                 ):
                     delete_prim(obj.container_prim_path)
-            elif isinstance(obj, ArticulationObject):
-                obj.relocate_offscreen()
             else:
                 if hasattr(obj, "prim_path") and is_prim_path_valid(obj.prim_path):
                     delete_prim(obj.prim_path)

@@ -94,7 +94,13 @@ class ObsManager:
             max_passes=self.capture_render_max_passes,
         )
 
-    def get_obs(self, env_idx_list=None):  # batch
+    def get_obs(self, env_idx_list=None):
+        if self.robot_manager is None:
+            return self._get_obs(env_idx_list)
+        with self.robot_manager.cpu_state(poses=True):
+            return self._get_obs(env_idx_list)
+
+    def _get_obs(self, env_idx_list=None):  # batch
         if env_idx_list is None:
             env_idx_list = range(self.num_envs)
         obs = dict()

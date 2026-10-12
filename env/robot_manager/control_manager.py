@@ -115,6 +115,10 @@ class ControlManager:  # Control sequences for all environments
             self.control_queue[idx].push(control_queue_list[i_th])
 
     def pop(self, env_idx_list=None):
+        with self.robot_manager.cpu_state():
+            return self._pop(env_idx_list)
+
+    def _pop(self, env_idx_list=None):
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
         empty_queue_list = self.get_empty(env_idx_list)

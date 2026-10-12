@@ -361,90 +361,91 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             control_info_list = []
             if env_idx_list is None:
                 env_idx_list = list(range(self.num_envs))
-            for idx, env_idx in enumerate(env_idx_list):
-                action = actions_list[idx]
-                self.validate_action_dict(action)
-                action_type = self.get_action_type(action)
-                if self.take_action_cnt[env_idx] == self.step_lim or self.end_flag[env_idx]:
-                    continue
+            with self.robot_manager.cpu_state(poses=True):
+                for idx, env_idx in enumerate(env_idx_list):
+                    action = actions_list[idx]
+                    self.validate_action_dict(action)
+                    action_type = self.get_action_type(action)
+                    if self.take_action_cnt[env_idx] == self.step_lim or self.end_flag[env_idx]:
+                        continue
 
-                self.take_action_cnt[env_idx] += 1
-                print(
-                    f"env{env_idx} step: \033[92m{self.take_action_cnt[env_idx]} / {self.step_lim}\033[0m",
-                    end="\r",
-                )
-                control_info = dict()
-                if action_type == "joint":
-                    for robot in self.robot_manager.robot_list:
-                        if robot.type != "target":
-                            continue
-                        key_name = self.robot_manager.process_name(robot.arm_name)
-                        control_info[key_name] = {
-                            "position": action[key_name],
-                        }
-
-                        key_name = self.robot_manager.process_name(robot.gripper_name)
-                        if robot.ee_type == "gripper":
-                            val = deepcopy(action[key_name][0])
-                            val = np.clip(val, 0, 1)
-                            if robot.gripper_move["sign"] == 1:
-                                val = val * (robot.gripper_scale[1] - robot.gripper_scale[0]) + robot.gripper_scale[0]
-                            else:
-                                val = (1 - val) * (
-                                    robot.gripper_scale[1] - robot.gripper_scale[0]
-                                ) + robot.gripper_scale[0]
-                            vals = [
-                                val,
-                                val * robot.gripper_move["mimic"][1] + robot.gripper_move["mimic"][2],
-                            ]
-                            control_info[key_name] = {"position": vals}
-                        elif robot.ee_type == "hand":
+                    self.take_action_cnt[env_idx] += 1
+                    print(
+                        f"env{env_idx} step: \033[92m{self.take_action_cnt[env_idx]} / {self.step_lim}\033[0m",
+                        end="\r",
+                    )
+                    control_info = dict()
+                    if action_type == "joint":
+                        for robot in self.robot_manager.robot_list:
+                            if robot.type != "target":
+                                continue
+                            key_name = self.robot_manager.process_name(robot.arm_name)
                             control_info[key_name] = {
                                 "position": action[key_name],
                             }
-                        else:
-                            pass
-                elif action_type == "ee":
-                    for robot in self.robot_manager.robot_list:
-                        if robot.type != "target":
-                            continue
-                        name = robot.arm_name.split("_")[0]
-                        key_name = f"{name}_ee_pose"
-                        obs_name = self.robot_manager.process_name(robot.arm_name)
-                        target_pose = action[key_name]
-                        ik_result = self.robot_manager.solve_ik(
-                            target_pose=target_pose,
-                            env_idx=env_idx,
-                            robot=robot,
-                        )
-                        if ik_result["status"] == "Success":
-                            control_info[obs_name] = {
-                                "position": ik_result["joint_value"],
-                            }
 
-                        key_name = self.robot_manager.process_name(robot.gripper_name)
-                        if robot.ee_type == "gripper":
-                            val = deepcopy(action[key_name][0])
-                            val = np.clip(val, 0, 1)
-                            if robot.gripper_move["sign"] == 1:
-                                val = val * (robot.gripper_scale[1] - robot.gripper_scale[0]) + robot.gripper_scale[0]
+                            key_name = self.robot_manager.process_name(robot.gripper_name)
+                            if robot.ee_type == "gripper":
+                                val = deepcopy(action[key_name][0])
+                                val = np.clip(val, 0, 1)
+                                if robot.gripper_move["sign"] == 1:
+                                    val = val * (robot.gripper_scale[1] - robot.gripper_scale[0]) + robot.gripper_scale[0]
+                                else:
+                                    val = (1 - val) * (
+                                        robot.gripper_scale[1] - robot.gripper_scale[0]
+                                    ) + robot.gripper_scale[0]
+                                vals = [
+                                    val,
+                                    val * robot.gripper_move["mimic"][1] + robot.gripper_move["mimic"][2],
+                                ]
+                                control_info[key_name] = {"position": vals}
+                            elif robot.ee_type == "hand":
+                                control_info[key_name] = {
+                                    "position": action[key_name],
+                                }
                             else:
-                                val = (1 - val) * (
-                                    robot.gripper_scale[1] - robot.gripper_scale[0]
-                                ) + robot.gripper_scale[0]
-                            vals = [
-                                val,
-                                val * robot.gripper_move["mimic"][1] + robot.gripper_move["mimic"][2],
-                            ]
-                            control_info[key_name] = {"position": vals}
-                        elif robot.ee_type == "hand":
-                            control_info[key_name] = {
-                                "position": action[key_name],
-                            }
-                        else:
-                            pass
-                control_seq = self.process_control_info(control_info, env_idx)
-                control_info_list.append(control_seq)
+                                pass
+                    elif action_type == "ee":
+                        for robot in self.robot_manager.robot_list:
+                            if robot.type != "target":
+                                continue
+                            name = robot.arm_name.split("_")[0]
+                            key_name = f"{name}_ee_pose"
+                            obs_name = self.robot_manager.process_name(robot.arm_name)
+                            target_pose = action[key_name]
+                            ik_result = self.robot_manager.solve_ik(
+                                target_pose=target_pose,
+                                env_idx=env_idx,
+                                robot=robot,
+                            )
+                            if ik_result["status"] == "Success":
+                                control_info[obs_name] = {
+                                    "position": ik_result["joint_value"],
+                                }
+
+                            key_name = self.robot_manager.process_name(robot.gripper_name)
+                            if robot.ee_type == "gripper":
+                                val = deepcopy(action[key_name][0])
+                                val = np.clip(val, 0, 1)
+                                if robot.gripper_move["sign"] == 1:
+                                    val = val * (robot.gripper_scale[1] - robot.gripper_scale[0]) + robot.gripper_scale[0]
+                                else:
+                                    val = (1 - val) * (
+                                        robot.gripper_scale[1] - robot.gripper_scale[0]
+                                    ) + robot.gripper_scale[0]
+                                vals = [
+                                    val,
+                                    val * robot.gripper_move["mimic"][1] + robot.gripper_move["mimic"][2],
+                                ]
+                                control_info[key_name] = {"position": vals}
+                            elif robot.ee_type == "hand":
+                                control_info[key_name] = {
+                                    "position": action[key_name],
+                                }
+                            else:
+                                pass
+                    control_seq = self.process_control_info(control_info, env_idx)
+                    control_info_list.append(control_seq)
 
             if len(control_info_list) > 0:
                 self.robot_manager.control_manager.push(env_idx_list, control_info_list)
@@ -636,9 +637,15 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                     )
 
         def step(self, env_idx_list, decimation=1):
-            meta_control_list = self.robot_manager.control_manager.pop(env_idx_list)
-            for _ in range(decimation):
-                super().step(meta_control_list=meta_control_list)
+            # Keep one host snapshot through queue processing and target upload.
+            # Drop it before advancing physics, including decimation > 1.
+            with self.robot_manager.cpu_state():
+                meta_control_list = self.robot_manager.control_manager.pop(env_idx_list)
+                if decimation > 0:
+                    super().step(meta_control_list=meta_control_list)
+            for index in range(decimation):
+                if index > 0:
+                    super().step(meta_control_list=meta_control_list)
                 self.sim_step(render=False)
 
         def _align_layout_success(self):

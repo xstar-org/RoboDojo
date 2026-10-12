@@ -25,6 +25,10 @@ parser.add_argument(
     required=True,
     help="XPolicyLab module name for deployment",
 )
+parser.add_argument(
+    "--sim_device", default=os.environ.get("ROBODOJO_SIM_DEVICE"),
+    help="Physics device (cpu or cuda:<logical index>); omitted uses the sim YAML.",
+)
 parser.add_argument("--port", type=int, required=True, help="the port for the policy WebSocket server")
 parser.add_argument(
     "--host",
@@ -308,6 +312,8 @@ def main():
             "deploy_cfg": deploy_cfg,
         }
     )
+    if args_cli.sim_device is not None:
+        OmegaConf.update(env_cfg, "sim.device", args_cli.sim_device, force_add=True)
     capped_num_envs = resolve_random_task_num_envs(task_name, num_envs, env_cfg.sim)
     if capped_num_envs != num_envs:
         print(

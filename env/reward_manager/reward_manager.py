@@ -59,6 +59,10 @@ class RewardManager:
         self.func_parser.initialize(env)
 
     def init_state(self):
+        with self.env.scene_manager.layout_manager.cpu_poses(), self.env.robot_manager.cpu_state(poses=True):
+            return self._snapshot_init_state()
+
+    def _snapshot_init_state(self):
         self.func_parser.init_state()
 
     def check(self, check_list: List[Tuple[Any, ...] | List[Tuple[Any, ...]]]):
@@ -355,6 +359,10 @@ class RewardManager:
         score_entries[env_idx] = still_pending
 
     def step(self, env_idx_list=None):
+        with self.env.scene_manager.layout_manager.cpu_poses(), self.env.robot_manager.cpu_state(poses=True):
+            return self._snapshot_step(env_idx_list)
+
+    def _snapshot_step(self, env_idx_list=None):
         if env_idx_list is None:
             env_idx_list = range(self.num_envs)
 
@@ -525,6 +533,10 @@ class RewardManager:
             )
 
     def get_reward(self, final_check=True):
+        with self.env.scene_manager.layout_manager.cpu_poses(), self.env.robot_manager.cpu_state(poses=True):
+            return self._snapshot_get_reward(final_check)
+
+    def _snapshot_get_reward(self, final_check=True):
         reward_lst = []
         if final_check:
             self._final_check()
