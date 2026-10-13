@@ -362,6 +362,25 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             if env_idx_list is None:
                 env_idx_list = list(range(self.num_envs))
             with self.robot_manager.cpu_state(poses=True):
+                batch_ik = {}
+                if os.environ.get("ROBODOJO_BATCH_IK", "0") == "1":
+                    active = [(idx, env_idx) for idx, env_idx in enumerate(env_idx_list)
+                              if self.take_action_cnt[env_idx] != self.step_lim and not self.end_flag[env_idx]
+                              and self.get_action_type(actions_list[idx]) == "ee"]
+                    for idx, _ in active:
+                        self.validate_action_dict(actions_list[idx])
+                    for robot in self.robot_manager.robot_list:
+                        if robot.type != "target" or not active:
+                            continue
+                        key = f"{robot.arm_name.split('_')[0]}_ee_pose"
+                        solved = self.robot_manager.solve_ik_batch(
+                            [actions_list[idx][key] for idx, _ in active],
+                            [env_idx for _, env_idx in active], robot,
+                        )
+                        if len(solved) != len(active):
+                            raise RuntimeError("Batched IK returned a different number of environments")
+                        for (_, env_idx), result in zip(active, solved):
+                            batch_ik[(env_idx, robot.arm_name)] = result
                 for idx, env_idx in enumerate(env_idx_list):
                     action = actions_list[idx]
                     self.validate_action_dict(action)
@@ -413,11 +432,13 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                             key_name = f"{name}_ee_pose"
                             obs_name = self.robot_manager.process_name(robot.arm_name)
                             target_pose = action[key_name]
-                            ik_result = self.robot_manager.solve_ik(
-                                target_pose=target_pose,
-                                env_idx=env_idx,
-                                robot=robot,
-                            )
+                            ik_result = batch_ik.get((env_idx, robot.arm_name))
+                            if ik_result is None:
+                                ik_result = self.robot_manager.solve_ik(
+                                    target_pose=target_pose,
+                                    env_idx=env_idx,
+                                    robot=robot,
+                                )
                             if ik_result["status"] == "Success":
                                 control_info[obs_name] = {
                                     "position": ik_result["joint_value"],
