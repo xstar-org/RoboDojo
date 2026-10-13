@@ -512,16 +512,16 @@ class LayoutManager:
             return None
         physics_type = self.instance_type_by_env[env_idx].get(inst_name, None)
         if physics_type:
-            _data = deepcopy(
-                self.object_records_by_type[physics_type.capitalize()].metadata_by_env[env_idx].get(inst_name, None)
-            )
+            _data = self.object_records_by_type[physics_type.capitalize()].metadata_by_env[env_idx].get(inst_name, None)
             if (
                 _data is not None
                 and "geometry" in _data
                 and ("oriented_bbox" in _data["geometry"])
                 and ("vertices" in _data["geometry"]["oriented_bbox"])
             ):
-                return np.asarray(_data["geometry"]["oriented_bbox"]["vertices"], dtype=float).reshape(-1, 3)
+                # Only the returned vertices need independent storage; copying all
+                # metadata here repeats for every object in every reward snapshot.
+                return np.array(_data["geometry"]["oriented_bbox"]["vertices"], dtype=float, copy=True).reshape(-1, 3)
         if getattr(obj, "get_bbox", None) is not None:
             return obj.get_bbox()
         return None

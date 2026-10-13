@@ -277,9 +277,12 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             data = self.obs_manager.get_obs(env_idx_list=env_idx_list)
             data_list = []
             for env_idx in env_idx_list:
-                if not self.end_flag[env_idx] or last_frame:
-                    self._stream_vision(env_idx, data[env_idx])
+                # Own the observation before streaming it. RGB slices from RGBA
+                # are strided; deepcopy already makes the independent RGB array
+                # contiguous, so video need not make a second image copy.
                 env_data = deepcopy(data[env_idx])
+                if not self.end_flag[env_idx] or last_frame:
+                    self._stream_vision(env_idx, env_data)
                 env_data["env_idx"] = env_idx
                 data_list.append(env_data)
             return data_list
