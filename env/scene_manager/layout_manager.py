@@ -19,6 +19,7 @@ import transforms3d as t3d
 from env.global_configs import *
 from env.seeding import seed_everywhere
 from utils.cpu_snapshot import cpu_snapshot
+from utils.rigid_pose_snapshot import RigidPoseReader
 from utils.cluttered_generator import ClutteredGenerator
 from utils.load_file import *
 from utils.path import deep_resolve_paths, get_mdl_paths_from_folder, get_usd_paths_from_folder, resolve_path
@@ -65,6 +66,7 @@ class LayoutManager:
     ):
         self.scene_manager = None
         self._cpu_poses = None
+        self._rigid_pose_reader = RigidPoseReader()
         self._projected_bbox_cache = None
         self._far_idx = 0
         self.num_envs = num_envs
@@ -131,6 +133,7 @@ class LayoutManager:
             self.ground_info[env_idx] = {}
 
     def clear_layout_state(self, env_idx_list=None):
+        self._rigid_pose_reader.reset()
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
         self.clear_object_records(env_idx_list)
@@ -428,10 +431,22 @@ class LayoutManager:
         previous = self._cpu_poses
         previous_bbox_cache = self._projected_bbox_cache
         values = {}
+        rigid_objects = {
+            (env_idx, name): self.get_scene_object(env_idx, name)
+            for env_idx, instances in enumerate(self.instance_type_by_env)
+            for name, kind in instances.items()
+            if kind == "rigid"
+        }
+        rigid_poses = {}
+        if self.scene_manager.device.type == "cuda":
+            rigid_poses = self._rigid_pose_reader.read(rigid_objects) or {}
         for env_idx, instances in enumerate(self.instance_type_by_env):
             for name, kind in instances.items():
                 if kind in ("rigid", "articulation", "garment", "geometry"):
-                    pos, rot = self._instance_pose(env_idx, name)
+                    if (env_idx, name) in rigid_poses:
+                        pos, rot = rigid_poses[(env_idx, name)]
+                    else:
+                        pos, rot = self._instance_pose(env_idx, name)
                     values[(env_idx, name, "pos")] = pos
                     values[(env_idx, name, "rot")] = rot
         values["origins"] = self.scene_manager.env_origins
