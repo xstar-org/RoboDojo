@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, List
 
 from env.camera_manager.camera_manager import CameraManager
@@ -5,6 +6,10 @@ from env.environment.base_env import BaseEnv
 from env.robot_manager.control_manager import ControlSeq
 from env.robot_manager.robot_manager import RobotManager
 from env.scene_manager.scene_manager import SceneManager
+from utils.material_redirects import redirect_remote_aluminum_cast
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class TaskEnv(BaseEnv):
@@ -66,10 +71,13 @@ class TaskEnv(BaseEnv):
 
     def _post_setup_scene(self, sim):
         self.scene_manager.initialize(sim)
+        redirect_remote_aluminum_cast(self.stage, _REPO_ROOT)
         super()._post_setup_scene(sim)
         self.camera_manager.initialize(sim)
         self.capture_manager.initialize(sim)
         self.camera_manager.post_init()
+        # Keep a stage-level fallback for alternate scene construction paths.
+        redirect_remote_aluminum_cast(self.stage, _REPO_ROOT)
 
     def update_seed(self, seed: Any | None = None):
         super().update_seed(seed)
@@ -83,6 +91,7 @@ class TaskEnv(BaseEnv):
     def reset(self, seed: Any | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed, options=options)
         self.scene_manager.reload_scene()
+        redirect_remote_aluminum_cast(self.stage, _REPO_ROOT)
         self.robot_manager.reset()
         for _ in range(300):
             self.sim_step(render=False)

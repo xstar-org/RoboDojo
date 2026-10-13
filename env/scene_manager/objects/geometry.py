@@ -1,4 +1,5 @@
 import random
+from pathlib import Path
 
 from isaacsim.core.api.materials.physics_material import PhysicsMaterial
 from isaacsim.core.api.materials.preview_surface import PreviewSurface
@@ -14,6 +15,11 @@ import omni.kit.commands
 import omni.usd
 from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 import torch
+
+from utils.material_redirects import redirect_aluminum_cast_asset_layer
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class GeometryObject(SingleGeometryPrim):
@@ -44,6 +50,10 @@ class GeometryObject(SingleGeometryPrim):
             primitive_type: The name of the primitive shape (e.g., "Cube"), if applicable.
         """
         if usd_path:
+            # Patch the source layer immediately before every reference. Scene
+            # resets can reopen the layer, and a later stage override loses the
+            # race with Hydra's material-pool compilation.
+            redirect_aluminum_cast_asset_layer(usd_path, _REPO_ROOT)
             prim = add_reference_to_stage(usd_path=usd_path, prim_path=prim_path)
         else:
             prim = get_prim_at_path(prim_path)
