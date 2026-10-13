@@ -533,6 +533,10 @@ class RewardManager:
             )
 
     def get_reward(self, final_check=True):
+        # Ordinary completion checks only inspect the counters updated by step().
+        # Only final predicates need a fresh physics/robot snapshot.
+        if not final_check:
+            return self._snapshot_get_reward(False)
         with self.env.scene_manager.layout_manager.cpu_poses(), self.env.robot_manager.cpu_state(poses=True):
             return self._snapshot_get_reward(final_check)
 

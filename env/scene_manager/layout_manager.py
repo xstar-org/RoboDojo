@@ -65,6 +65,7 @@ class LayoutManager:
     ):
         self.scene_manager = None
         self._cpu_poses = None
+        self._projected_bbox_cache = None
         self._far_idx = 0
         self.num_envs = num_envs
         self.env_spacing = env_spacing
@@ -425,6 +426,7 @@ class LayoutManager:
     def cpu_poses(self):
         """Batch object poses before CPU reward predicates inspect environments."""
         previous = self._cpu_poses
+        previous_bbox_cache = self._projected_bbox_cache
         values = {}
         for env_idx, instances in enumerate(self.instance_type_by_env):
             for name, kind in instances.items():
@@ -434,10 +436,12 @@ class LayoutManager:
                     values[(env_idx, name, "rot")] = rot
         values["origins"] = self.scene_manager.env_origins
         self._cpu_poses = cpu_snapshot(values)
+        self._projected_bbox_cache = {}
         try:
             yield
         finally:
             self._cpu_poses = previous
+            self._projected_bbox_cache = previous_bbox_cache
 
     def _instance_pose(self, env_idx, inst_name):
         kind = self.instance_type_by_env[env_idx].get(inst_name)
@@ -482,6 +486,24 @@ class LayoutManager:
         if desc_data is None:
             return []
         return desc_data
+
+    def get_instance_projected_bbox(self, inst_name, env_idx):
+        """Reuse a footprint only within the current frozen reward-state scope."""
+        key = (env_idx, inst_name)
+        cache = self._projected_bbox_cache
+        if cache is not None and key in cache:
+            return cache[key]
+        pos, rot = self.get_instance_pose(env_idx=env_idx, inst_name=inst_name)
+        vertices = self.get_instance_bbox_vertices(inst_name=inst_name, env_idx=env_idx)
+        if pos is None or rot is None or vertices is None:
+            return None
+        projected = calc_polygon(
+            origin_pose=np.concatenate([pos, rot]),
+            origin_bbox_points=np.asarray(vertices, dtype=float).reshape(-1, 3),
+        )
+        if cache is not None:
+            cache[key] = projected
+        return projected
 
     def get_instance_bbox_vertices(self, inst_name, env_idx):
         obj = self.get_scene_object(env_idx, inst_name)
