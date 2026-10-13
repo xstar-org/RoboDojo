@@ -3,6 +3,7 @@ Tiled capture manager: initializes tiled render products and annotators for eval
 """
 
 from copy import deepcopy
+import os
 from typing import List
 
 from isaacsim.sensors.camera import Camera
@@ -32,6 +33,12 @@ class TiledCaptureManager:
         self.camera_manager = camera_manager
         self.num_envs = num_envs
         self.device = device
+        # One pass trades temporal rendering convergence for lower latency.
+        # Keep the established two-pass path unless explicitly requested.
+        self.render_passes = int(os.environ.get("ROBODOJO_CAMERA_RENDER_PASSES", "2"))
+        if self.render_passes not in (1, 2):
+            raise ValueError("ROBODOJO_CAMERA_RENDER_PASSES must be 1 or 2")
+        print(f"[TiledCaptureManager] sequential capture: render_passes={self.render_passes}")
         self.tiled_render_products: List[str] = []  # all the render products
         self.annotator: List[
             List[List[Annotator]]
@@ -152,7 +159,7 @@ class TiledCaptureManager:
             texture = self.tiled_render_products[cam_id].hydra_texture
             texture.set_updates_enabled(True)
             try:
-                wait_for_latest_cameras(context, min_passes=2)
+                wait_for_latest_cameras(context, min_passes=self.render_passes)
                 data.extend(self._read_camera(env_ids=env_ids, cam_ids=[cam_id]))
             finally:
                 texture.set_updates_enabled(False)
