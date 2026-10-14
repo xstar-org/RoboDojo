@@ -19,6 +19,7 @@ import transforms3d as t3d
 from env.global_configs import *
 from env.seeding import seed_everywhere
 from utils.cpu_snapshot import cpu_snapshot
+from utils.pose_snapshot import local_poses_from_world
 from utils.cluttered_generator import ClutteredGenerator
 from utils.load_file import *
 from utils.path import deep_resolve_paths, get_mdl_paths_from_folder, get_usd_paths_from_folder, resolve_path
@@ -428,14 +429,38 @@ class LayoutManager:
         previous = self._cpu_poses
         previous_bbox_cache = self._projected_bbox_cache
         values = {}
+        rigid_entries = []
+        from pxr import Usd, UsdGeom
+
+        # A fresh cache keeps parent transforms consistent with this snapshot.
+        parent_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
         for env_idx, instances in enumerate(self.instance_type_by_env):
             for name, kind in instances.items():
                 if kind in ("rigid", "articulation", "garment", "geometry"):
+                    obj = self.get_scene_object(env_idx, name)
+                    view = getattr(obj, "_prim_view", None)
+                    if kind == "rigid" and view is not None and view.is_physics_handle_valid():
+                        pos, rot = obj.get_world_pose()
+                        values[(env_idx, name, "world_pos")] = pos
+                        values[(env_idx, name, "world_rot")] = rot
+                        parent = obj.stage.GetPrimAtPath(obj._prim_path).GetParent()
+                        matrix = np.asarray(parent_cache.GetLocalToWorldTransform(parent), dtype=np.float32)
+                        rigid_entries.append((env_idx, name, matrix))
+                        continue
                     pos, rot = self._instance_pose(env_idx, name)
                     values[(env_idx, name, "pos")] = pos
                     values[(env_idx, name, "rot")] = rot
         values["origins"] = self.scene_manager.env_origins
-        self._cpu_poses = cpu_snapshot(values)
+        snapshot = cpu_snapshot(values)
+        if rigid_entries:
+            parents = np.stack([entry[2] for entry in rigid_entries])
+            positions = np.stack([snapshot[(idx, name, "world_pos")] for idx, name, _ in rigid_entries])
+            orientations = np.stack([snapshot[(idx, name, "world_rot")] for idx, name, _ in rigid_entries])
+            positions, orientations = local_poses_from_world(parents, positions, orientations)
+            for index, (idx, name, _) in enumerate(rigid_entries):
+                snapshot[(idx, name, "pos")] = positions[index]
+                snapshot[(idx, name, "rot")] = orientations[index]
+        self._cpu_poses = snapshot
         self._projected_bbox_cache = {}
         try:
             yield
@@ -512,16 +537,14 @@ class LayoutManager:
             return None
         physics_type = self.instance_type_by_env[env_idx].get(inst_name, None)
         if physics_type:
-            _data = deepcopy(
-                self.object_records_by_type[physics_type.capitalize()].metadata_by_env[env_idx].get(inst_name, None)
-            )
+            _data = self.object_records_by_type[physics_type.capitalize()].metadata_by_env[env_idx].get(inst_name, None)
             if (
                 _data is not None
                 and "geometry" in _data
                 and ("oriented_bbox" in _data["geometry"])
                 and ("vertices" in _data["geometry"]["oriented_bbox"])
             ):
-                return np.asarray(_data["geometry"]["oriented_bbox"]["vertices"], dtype=float).reshape(-1, 3)
+                return np.array(_data["geometry"]["oriented_bbox"]["vertices"], dtype=float, copy=True).reshape(-1, 3)
         if getattr(obj, "get_bbox", None) is not None:
             return obj.get_bbox()
         return None
