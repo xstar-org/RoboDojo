@@ -66,6 +66,10 @@ class LayoutManager:
     ):
         self.scene_manager = None
         self._cpu_poses = None
+        reward_pose_mode = os.environ.get("ROBODOJO_BATCH_REWARD_POSES", "1")
+        if reward_pose_mode not in {"0", "1"}:
+            raise ValueError("ROBODOJO_BATCH_REWARD_POSES must be 0 or 1")
+        self._batch_reward_poses = reward_pose_mode == "1"
         self._projected_bbox_cache = None
         self._far_idx = 0
         self.num_envs = num_envs
@@ -430,14 +434,18 @@ class LayoutManager:
         previous_bbox_cache = self._projected_bbox_cache
         values = {}
         rigid_entries = []
-        from pxr import Usd, UsdGeom
+        parent_cache = None
+        if getattr(self, "_batch_reward_poses", True):
+            from pxr import Usd, UsdGeom
 
-        # A fresh cache keeps parent transforms consistent with this snapshot.
-        parent_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+            # A fresh cache keeps parent transforms consistent with this snapshot.
+            parent_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
         for env_idx, instances in enumerate(self.instance_type_by_env):
             for name, kind in instances.items():
                 if kind in ("rigid", "articulation", "garment", "geometry"):
-                    obj = self.get_scene_object(env_idx, name)
+                    obj = None
+                    if getattr(self, "_batch_reward_poses", True) and kind == "rigid":
+                        obj = self.get_scene_object(env_idx, name)
                     view = getattr(obj, "_prim_view", None)
                     if kind == "rigid" and view is not None and view.is_physics_handle_valid():
                         pos, rot = obj.get_world_pose()
@@ -538,13 +546,18 @@ class LayoutManager:
         physics_type = self.instance_type_by_env[env_idx].get(inst_name, None)
         if physics_type:
             _data = self.object_records_by_type[physics_type.capitalize()].metadata_by_env[env_idx].get(inst_name, None)
+            if not getattr(self, "_batch_reward_poses", True):
+                _data = deepcopy(_data)
             if (
                 _data is not None
                 and "geometry" in _data
                 and ("oriented_bbox" in _data["geometry"])
                 and ("vertices" in _data["geometry"]["oriented_bbox"])
             ):
-                return np.array(_data["geometry"]["oriented_bbox"]["vertices"], dtype=float, copy=True).reshape(-1, 3)
+                vertices = _data["geometry"]["oriented_bbox"]["vertices"]
+                if getattr(self, "_batch_reward_poses", True):
+                    return np.array(vertices, dtype=float, copy=True).reshape(-1, 3)
+                return np.asarray(vertices, dtype=float).reshape(-1, 3)
         if getattr(obj, "get_bbox", None) is not None:
             return obj.get_bbox()
         return None
