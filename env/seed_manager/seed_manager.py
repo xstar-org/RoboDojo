@@ -43,6 +43,17 @@ class SeedManager:
             self.seed_info[idx] = {"scene_layout": file_path}
 
         all_layout_ids = list(range(len(matching_files)))
+        # Explicit shards let independent clients evaluate disjoint layouts
+        # while keeping each layout's original identity and scene file.
+        requested = os.environ.get("ROBODOJO_EVAL_LAYOUT_IDS")
+        if requested is not None:
+            try:
+                selected = [int(value.strip()) for value in requested.split(",")]
+            except ValueError as exc:
+                raise ValueError("ROBODOJO_EVAL_LAYOUT_IDS must be comma-separated integers") from exc
+            if len(set(selected)) != len(selected) or any(value not in self.seed_info for value in selected):
+                raise ValueError("ROBODOJO_EVAL_LAYOUT_IDS contains duplicate or unavailable layouts")
+            all_layout_ids = selected
         excluded = set(int(s) for s in (completed_layout_ids or [])) | set(int(s) for s in (abandoned_layout_ids or []))
         if excluded:
             self.seed_list: List[int] = [s for s in all_layout_ids if s not in excluded]

@@ -3,6 +3,7 @@ Tiled capture manager: initializes tiled render products and annotators for eval
 """
 
 from copy import deepcopy
+import os
 from typing import List
 
 from isaacsim.sensors.camera import Camera
@@ -32,6 +33,12 @@ class TiledCaptureManager:
         self.camera_manager = camera_manager
         self.num_envs = num_envs
         self.device = device
+        # One pass trades temporal rendering convergence for lower latency.
+        # Keep the established two-pass path unless explicitly requested.
+        self.render_passes = int(os.environ.get("ROBODOJO_CAMERA_RENDER_PASSES", "2"))
+        if self.render_passes not in (1, 2):
+            raise ValueError("ROBODOJO_CAMERA_RENDER_PASSES must be 1 or 2")
+        print(f"[TiledCaptureManager] sequential capture: render_passes={self.render_passes}")
         self.tiled_render_products: List[str] = []  # all the render products
         self.annotator: List[
             List[List[Annotator]]
@@ -65,6 +72,12 @@ class TiledCaptureManager:
         3. Attach Annotator
         """
         self.camera_prim_paths.clear()
+        self.annotator.clear()
+        self.annotator_type.clear()
+        self.annotator_device.clear()
+        self.tiled_cameras.clear()
+        self.tiled_render_products.clear()
+        self._output_buffers.clear()
         for env_id in range(self.num_envs):
             self.camera_prim_paths.append([])
             for camera in self.cameras[env_id]:
@@ -105,11 +118,13 @@ class TiledCaptureManager:
             height, width = camera_resolution[1], camera_resolution[0]
             tiled_camera = CameraView(
                 prim_paths_by_cam_id,
+                name=f"independent_camera_{cam_id}",
                 camera_resolution=[width, height],
                 output_annotators=self.annotator_type[cam_id],
             )
             self.tiled_cameras.append(tiled_camera)
             self.tiled_render_products.append(tiled_camera._render_product)
+            tiled_camera._render_product.hydra_texture.set_updates_enabled(False)
 
             # Pre-allocate output buffers for this camera's annotators
             self._output_buffers[cam_id] = {}
@@ -129,7 +144,30 @@ class TiledCaptureManager:
 
                 self._output_buffers[cam_id][annotator_name] = wp.zeros(shape, dtype=spec["dtype"], device="cuda:0")
 
-    def step(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
+    render_in_step = True
+
+    def step(self, env_ids=None, cam_ids=None):
+        """Capture independent camera products sequentially at one physics state."""
+        from env.camera_manager.capture.render_sync import wait_for_latest_cameras
+
+        if cam_ids is None:
+            cam_ids = list(range(self.num_cams))
+        context = self.sim.sim
+        start_time = context.current_time
+        data = []
+        for cam_id in cam_ids:
+            texture = self.tiled_render_products[cam_id].hydra_texture
+            texture.set_updates_enabled(True)
+            try:
+                wait_for_latest_cameras(context, min_passes=self.render_passes)
+                data.extend(self._read_camera(env_ids=env_ids, cam_ids=[cam_id]))
+            finally:
+                texture.set_updates_enabled(False)
+        if context.current_time != start_time:
+            raise RuntimeError("Physics advanced during sequential camera capture")
+        return data
+
+    def _read_camera(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
         """
         Step the annotator. When env_id and cam_id is given, use the given. Otherwise apply to all cameras.
         Args:

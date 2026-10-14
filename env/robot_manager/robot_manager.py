@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import deepcopy
+from contextlib import contextmanager
 from importlib import import_module
 from typing import List, Literal
 
@@ -15,6 +16,7 @@ from env.global_configs import ENV_REGEX_NAMESPACE
 from env.planner_manager.curobo_planner import CuroboPlanner
 from env.robot_manager.control_manager import ControlManager, MetaControl
 from utils.ensure_usd_path import ensure_usd_path
+from utils.cpu_snapshot import cpu_snapshot
 
 
 class RobotManager:
@@ -35,6 +37,7 @@ class RobotManager:
         self.dt = dt
         self._seeds_per_env: list[int] | None = None
 
+        self._cpu_state = None
         self.robot_list = []
         self.robot_key = []
         self.target_arm_nums = 0
@@ -137,69 +140,59 @@ class RobotManager:
             is_relative=is_relative,
         )
 
+    @contextmanager
+    def cpu_state(self, poses=False):
+        """Freeze batched state for a CPU-only phase; never span a physics step."""
+        previous = self._cpu_state
+        if previous is not None and (not poses or "origins" in previous):
+            yield
+            return
+        values = {}
+        for key in self.robot_key:
+            values[(id(key), "joints")] = key.data.joint_pos
+            if poses:
+                values[(id(key), "poses")] = key.data.body_link_pose_w
+        if poses:
+            values["origins"] = self.scene.env_origins
+        self._cpu_state = cpu_snapshot(values)
+        try:
+            yield
+        finally:
+            self._cpu_state = previous
+
+    def _host_state(self, key, field):
+        name = (id(key), field)
+        if self._cpu_state is not None and name in self._cpu_state:
+            return self._cpu_state[name]
+        value = key.data.joint_pos if field == "joints" else key.data.body_link_pose_w
+        return cpu_snapshot({name: value})[name]
+
+    def _select_state(self, values, env_idx_list):
+        selected = set(range(self.num_envs) if env_idx_list is None else env_idx_list)
+        return {i: values[i].copy() if i in selected else None for i in range(self.num_envs)}
+
     def get_link_pose(self, robot, link_name, env_idx_list=None, is_relative=False):
-        if env_idx_list is None:
-            env_idx_list = list(range(self.num_envs))
-
-        results = {}
         key = self.robot_key[self.robot_list.index(robot)]
-        entity_link = key.body_names
-        env_origin_pos = deepcopy(self.scene.env_origins)
-        link_pose = key.data.body_link_pose_w.clone()
-
-        if link_name not in entity_link:
+        if link_name not in key.body_names:
             raise ValueError(f"Link name {link_name} not found in robot {robot.robot_name}")
-
-        link_idx = entity_link.index(link_name)
-        for env_idx in range(self.num_envs):
-            if env_idx in env_idx_list:
-                pose = deepcopy(link_pose[env_idx][link_idx])
-                if not is_relative:
-                    results[env_idx] = np.array(pose.cpu())
-                else:
-                    origin_pos = env_origin_pos[env_idx]
-                    # pose: [x, y, z, qw, qx, qy, qz] in world frame
-                    # origin_pos: [x, y, z] of env origin in world frame
-                    # relative position = world_pos - origin_pos (origin has translation only)
-                    rel_pose = pose.clone()
-                    rel_pose[:3] = rel_pose[:3] - origin_pos
-                    results[env_idx] = np.array(rel_pose.cpu())
-
+        poses = self._host_state(key, "poses")[:, key.body_names.index(link_name)].copy()
+        if is_relative:
+            if self._cpu_state is not None and "origins" in self._cpu_state:
+                origins = self._cpu_state["origins"]
             else:
-                results[env_idx] = None
-        return results
+                origins = cpu_snapshot({"origins": self.scene.env_origins})["origins"]
+            poses[:, :3] -= origins
+        return self._select_state(poses, env_idx_list)
 
     def get_joint(self, robot, env_idx_list=None):
-        if env_idx_list is None:
-            env_idx_list = list(range(self.num_envs))
-
-        results = {}
         key = self.robot_key[self.robot_list.index(robot)]
-        arm_indices = robot.arm_joint_indices
-        joint_state = key.data.joint_pos.clone()
-        for env_idx in range(self.num_envs):
-            if env_idx in env_idx_list:
-                joints = deepcopy(joint_state[env_idx][arm_indices])
-                results[env_idx] = np.array(joints.cpu())
-            else:
-                results[env_idx] = None
-        return results
+        values = self._host_state(key, "joints")[:, robot.arm_joint_indices]
+        return self._select_state(values, env_idx_list)
 
     def get_end_effector_real_val(self, robot, env_idx_list=None):
-        if env_idx_list is None:
-            env_idx_list = list(range(self.num_envs))
-
-        results = {}
         key = self.robot_key[self.robot_list.index(robot)]
-        gripper_indices = robot.gripper_joint_indices
-        joint_state = key.data.joint_pos.clone()
-        for env_idx in range(self.num_envs):
-            if env_idx in env_idx_list:
-                joints = deepcopy(joint_state[env_idx][gripper_indices])
-                results[env_idx] = np.array(joints.cpu())
-            else:
-                results[env_idx] = None
-        return results
+        values = self._host_state(key, "joints")[:, robot.gripper_joint_indices]
+        return self._select_state(values, env_idx_list)
 
     def get_delta_endpose(self, robot, env_idx_list=None):
         if env_idx_list is None:
@@ -337,6 +330,12 @@ class RobotManager:
         robot_pose = deepcopy(robot.entity_origin_pose)
         return planner.solve_ik_to_joint(now_qpos, trans_target_pose, real_robot_pose=robot_pose)
 
+    def solve_ik_batch(self, target_poses, env_indices, robot):
+        states = self.get_joint(robot, env_idx_list=env_indices)
+        return self.ik_solver[robot.robot_name].solve_ik_batch_to_joint(
+            [states[i] for i in env_indices], target_poses, deepcopy(robot.entity_origin_pose)
+        )
+
     def process_name(self, name):
         if name.endswith("_state"):
             return name
@@ -353,7 +352,11 @@ class RobotManager:
         else:
             return processed_name
 
-    def control_robot(
+    def control_robot(self, meta_control_list=None):
+        with self.cpu_state():
+            return self._control_robot(meta_control_list)
+
+    def _control_robot(
         self,
         meta_control_list=None,
     ):
@@ -370,9 +373,9 @@ class RobotManager:
                 action_dim = len(robot.arm_joint_indices)
                 gripper_dim = len(robot.gripper_joint_indices)
                 arm = self.robot_key[self.robot_list.index(robot)]
-                arm_position = torch.zeros((plan_num, action_dim), device=sim.device, dtype=torch.float32)
-                arm_velocity = torch.zeros((plan_num, action_dim), device=sim.device, dtype=torch.float32)
-                gripper_position = torch.zeros((plan_num, gripper_dim), device=sim.device, dtype=torch.float32)
+                arm_position = torch.zeros((plan_num, action_dim), device="cpu", dtype=torch.float32)
+                arm_velocity = torch.zeros((plan_num, action_dim), device="cpu", dtype=torch.float32)
+                gripper_position = torch.zeros((plan_num, gripper_dim), device="cpu", dtype=torch.float32)
 
                 for id, env_idx in enumerate(plan_lst):
                     meta_control = meta_control_list[env_idx].get_action(
@@ -381,21 +384,26 @@ class RobotManager:
                     )  # get action dict
                     arm_position[id] = torch.tensor(
                         meta_control[self.process_name(robot.arm_name)]["position"],
-                        device=sim.device,
+                        device="cpu",
                         dtype=torch.float32,
                     )
                     arm_velocity[id] = torch.tensor(
                         meta_control[self.process_name(robot.arm_name)]["velocity"],
-                        device=sim.device,
+                        device="cpu",
                         dtype=torch.float32,
                     )
                     gripper_position[id][:] = torch.tensor(
                         meta_control[self.process_name(robot.gripper_name)]["position"],
-                        device=sim.device,
+                        device="cpu",
                         dtype=torch.float32,
                     )
 
-                env_ids = torch.tensor(plan_lst, dtype=torch.int32, device=arm_velocity.device)
+                # Assemble all environments on the host, then upload one control buffer.
+                targets = torch.cat((arm_position, arm_velocity, gripper_position), dim=1).to(sim.device)
+                arm_position, arm_velocity, gripper_position = targets.split(
+                    (action_dim, action_dim, gripper_dim), dim=1
+                )
+                env_ids = torch.tensor(plan_lst, dtype=torch.int32, device=sim.device)
                 arm.set_joint_position_target(arm_position, joint_ids=robot.arm_joint_indices, env_ids=env_ids)  # arm
                 arm.set_joint_velocity_target(arm_velocity, joint_ids=robot.arm_joint_indices, env_ids=env_ids)  # arm
                 arm.set_joint_position_target(

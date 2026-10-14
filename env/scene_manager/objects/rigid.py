@@ -240,6 +240,14 @@ class RigidObject(SingleRigidPrim, SingleGeometryPrim):
 
     def _apply_default_velocities(self):
         """Re-apply default linear/angular velocity if configured."""
+        if self._default_linear_velocity is not None and self._default_angular_velocity is not None:
+            # Partial velocity setters are unsupported by the GPU pipeline.
+            # Submit the complete six-component state through the batched view.
+            velocity = [*self._default_linear_velocity, *self._default_angular_velocity]
+            view = self._rigid_prim_view
+            values = view._backend_utils.convert([velocity], device=view._device, dtype="float32")
+            view.set_velocities(values)
+            return
         if self._default_linear_velocity is not None:
             self.set_linear_velocity(torch.tensor(self._default_linear_velocity))
         if self._default_angular_velocity is not None:
