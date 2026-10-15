@@ -83,6 +83,8 @@ class ObsManager:
 
         Call this instead of a bare ``env.render()`` right before ``get_obs``.
         """
+        if getattr(self.capture_manager, "render_in_step", False):
+            return
         from env.camera_manager.capture.render_sync import wait_for_latest_cameras
 
         wait_for_latest_cameras(

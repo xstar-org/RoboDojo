@@ -65,6 +65,12 @@ class TiledCaptureManager:
         3. Attach Annotator
         """
         self.camera_prim_paths.clear()
+        self.annotator.clear()
+        self.annotator_type.clear()
+        self.annotator_device.clear()
+        self.tiled_cameras.clear()
+        self.tiled_render_products.clear()
+        self._output_buffers.clear()
         for env_id in range(self.num_envs):
             self.camera_prim_paths.append([])
             for camera in self.cameras[env_id]:
@@ -105,11 +111,14 @@ class TiledCaptureManager:
             height, width = camera_resolution[1], camera_resolution[0]
             tiled_camera = CameraView(
                 prim_paths_by_cam_id,
+                name=f"independent_camera_{cam_id}",
                 camera_resolution=[width, height],
                 output_annotators=self.annotator_type[cam_id],
             )
             self.tiled_cameras.append(tiled_camera)
             self.tiled_render_products.append(tiled_camera._render_product)
+            if self.num_envs > 1:
+                tiled_camera._render_product.hydra_texture.set_updates_enabled(False)
 
             # Pre-allocate output buffers for this camera's annotators
             self._output_buffers[cam_id] = {}
@@ -129,7 +138,34 @@ class TiledCaptureManager:
 
                 self._output_buffers[cam_id][annotator_name] = wp.zeros(shape, dtype=spec["dtype"], device="cuda:0")
 
-    def step(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
+    @property
+    def render_in_step(self):
+        return self.num_envs > 1
+
+    def step(self, env_ids=None, cam_ids=None):
+        """Capture independent camera products sequentially at one physics state."""
+        if self.num_envs == 1:
+            return self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
+        from env.camera_manager.capture.render_sync import wait_for_latest_cameras
+
+        if cam_ids is None:
+            cam_ids = list(range(self.num_cams))
+        context = self.sim.sim
+        start_time = context.current_time
+        data = []
+        for cam_id in cam_ids:
+            texture = self.tiled_render_products[cam_id].hydra_texture
+            texture.set_updates_enabled(True)
+            try:
+                wait_for_latest_cameras(context, min_passes=2)
+                data.extend(self._read_camera(env_ids=env_ids, cam_ids=[cam_id]))
+            finally:
+                texture.set_updates_enabled(False)
+        if context.current_time != start_time:
+            raise RuntimeError("Physics advanced during sequential camera capture")
+        return data
+
+    def _read_camera(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
         """
         Step the annotator. When env_id and cam_id is given, use the given. Otherwise apply to all cameras.
         Args:
