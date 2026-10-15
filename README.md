@@ -74,6 +74,27 @@ XPolicyLab/policy/<POLICY_NAME>/deploy.yml
 
 `eval.sh` starts the policy server and calls back into RoboDojo through `scripts/eval_policy.sh`; `deploy.yml` declares the server host, port, action mode, and policy-specific runtime settings.
 
+## Reward state batching
+
+`ROBODOJO_BATCH_REWARD=1` (default) snapshots object poses and robot state once
+per reward call, groups host transfers by tensor device and dtype, and reuses
+projected object footprints within that call. Snapshots are discarded on return
+or exception. Control and observation reads outside reward evaluation retain
+their original paths.
+
+Set `ROBODOJO_BATCH_REWARD=0` before creating the environment to use the original
+reward read path for comparisons. This switch does not change reward thresholds,
+score rules, camera settings, physics, or policy inference settings.
+
+Run the standalone scope and value tests from the repository root:
+
+```bash
+python -m unittest discover -s tests -p 'test_reward_*.py'
+```
+
+The tests need NumPy and PyTorch; the value tests use CUDA when available. Full
+simulation and throughput validation require the Isaac Sim evaluation runtime.
+
 ## 🏆 Leaderboard
 
 View live rankings on the [RoboDojo Leaderboard](https://robodojo-benchmark.com/leaderboard).
