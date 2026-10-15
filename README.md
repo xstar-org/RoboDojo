@@ -92,8 +92,9 @@ Run the standalone scope and value tests from the repository root:
 python -m unittest discover -s tests -p 'test_reward_*.py'
 ```
 
-The tests need NumPy and PyTorch; the value tests use CUDA when available. Full
-simulation and throughput validation require the Isaac Sim evaluation runtime.
+The tests need NumPy, PyTorch, SciPy, Shapely and transforms3d; the tensor value
+tests use CUDA when available. Full simulation and throughput validation require
+the Isaac Sim evaluation runtime.
 
 ## 🏆 Leaderboard
 
