@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from copy import deepcopy
+from contextlib import contextmanager
 from importlib import import_module
 from typing import List, Literal
 
@@ -15,6 +16,7 @@ from env.global_configs import ENV_REGEX_NAMESPACE
 from env.planner_manager.curobo_planner import CuroboPlanner
 from env.robot_manager.control_manager import ControlManager, MetaControl
 from utils.ensure_usd_path import ensure_usd_path
+from utils.cpu_snapshot import cpu_snapshot
 
 
 class RobotManager:
@@ -35,6 +37,7 @@ class RobotManager:
         self.dt = dt
         self._seeds_per_env: list[int] | None = None
 
+        self._cpu_state = None
         self.robot_list = []
         self.robot_key = []
         self.target_arm_nums = 0
@@ -137,7 +140,50 @@ class RobotManager:
             is_relative=is_relative,
         )
 
+    @contextmanager
+    def cpu_state(self, poses=False):
+        """Freeze batched state for a CPU-only phase; never span a physics step."""
+        previous = self._cpu_state
+        if previous is not None and (not poses or "origins" in previous):
+            yield
+            return
+        values = {}
+        for key in self.robot_key:
+            values[(id(key), "joints")] = key.data.joint_pos
+            if poses:
+                values[(id(key), "poses")] = key.data.body_link_pose_w
+        if poses:
+            values["origins"] = self.scene.env_origins
+        self._cpu_state = cpu_snapshot(values)
+        try:
+            yield
+        finally:
+            self._cpu_state = previous
+
+    def _host_state(self, key, field):
+        name = (id(key), field)
+        if self._cpu_state is not None and name in self._cpu_state:
+            return self._cpu_state[name]
+        value = key.data.joint_pos if field == "joints" else key.data.body_link_pose_w
+        return cpu_snapshot({name: value})[name]
+
+    def _select_state(self, values, env_idx_list):
+        selected = set(range(self.num_envs) if env_idx_list is None else env_idx_list)
+        return {i: values[i].copy() if i in selected else None for i in range(self.num_envs)}
+
     def get_link_pose(self, robot, link_name, env_idx_list=None, is_relative=False):
+        if self._cpu_state is not None:
+            key = self.robot_key[self.robot_list.index(robot)]
+            if link_name not in key.body_names:
+                raise ValueError(f"Link name {link_name} not found in robot {robot.robot_name}")
+            poses = self._host_state(key, "poses")[:, key.body_names.index(link_name)].copy()
+            if is_relative:
+                if self._cpu_state is not None and "origins" in self._cpu_state:
+                    origins = self._cpu_state["origins"]
+                else:
+                    origins = cpu_snapshot({"origins": self.scene.env_origins})["origins"]
+                poses[:, :3] -= origins
+            return self._select_state(poses, env_idx_list)
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
 
@@ -170,6 +216,10 @@ class RobotManager:
         return results
 
     def get_joint(self, robot, env_idx_list=None):
+        if self._cpu_state is not None:
+            key = self.robot_key[self.robot_list.index(robot)]
+            values = self._host_state(key, "joints")[:, robot.arm_joint_indices]
+            return self._select_state(values, env_idx_list)
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
 
@@ -186,6 +236,10 @@ class RobotManager:
         return results
 
     def get_end_effector_real_val(self, robot, env_idx_list=None):
+        if self._cpu_state is not None:
+            key = self.robot_key[self.robot_list.index(robot)]
+            values = self._host_state(key, "joints")[:, robot.gripper_joint_indices]
+            return self._select_state(values, env_idx_list)
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
 
