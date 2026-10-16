@@ -1,3 +1,9 @@
+# Wrist cameras render directly at the policy composed wrist tile size
+# (about 114x120 inside the 240x416 training condition); rendering them at
+# full 640x480 only adds render cost before the resize. Set [640, 480] to
+# restore full-resolution wrist rendering.
+wrist_camera_resolution: [160, 120]
+
 annotator:
   common:
     enabled: True

@@ -36,6 +36,20 @@ VISUAL_MAP = {
 }
 
 
+def resolve_camera_resolution(camera_name, template_resolution, wrist_override):
+    """Resolve a camera's render resolution.
+
+    Wrist cameras can render at a lower target resolution from config: the
+    evaluation policy composes each wrist view down to a small tile anyway
+    (VPP2's wrist region is ~114x120 inside the 240x416 condition), so
+    rendering wrists at full 640x480 only spends render cost. ``wrist_override``
+    is ``(width, height)`` or ``None`` to keep each camera template default.
+    """
+    if wrist_override is not None and str(camera_name).endswith("_wrist"):
+        return wrist_override
+    return template_resolution
+
+
 class CameraManager:
     """
     This manager is responsible for managing all cameras in the environment.
@@ -57,6 +71,7 @@ class CameraManager:
         self.num_cams = 1
         self.camera_config = camera_config
         self.init_config = camera_config
+        self.wrist_camera_resolution = None
         self.device = device
         self.sim: IsaacRLEnv = None
         self.cameras: List[List[Camera]] = []  # List of cameras for all environments
@@ -183,6 +198,10 @@ class CameraManager:
                 default_frequency = config.pop("default_frequency")
             if "annotator" in config:
                 config.pop("annotator")
+            if "wrist_camera_resolution" in config:
+                self.wrist_camera_resolution = tuple(
+                    int(v) for v in config.pop("wrist_camera_resolution")
+                )
             random_config = config.pop("random", {})
             self.random_config = OmegaConf.create(random_config)
 
@@ -250,7 +269,9 @@ class CameraManager:
                     self.cameras_xform[env_id].append(cur_camera_xform)
 
                     cur_camera_path = cur_camera_xform_path + args_info["path"]
-                    cur_camera_resolution = args_info["resolution"]
+                    cur_camera_resolution = resolve_camera_resolution(
+                        camera_name, args_info["resolution"], self.wrist_camera_resolution
+                    )
                     cur_camera = Camera(
                         prim_path=cur_camera_path,
                         resolution=cur_camera_resolution,
@@ -280,7 +301,9 @@ class CameraManager:
                     self._set_camera_semantics(cur_camera_xform, camera_name, camera_config)
                     self.cameras_xform[env_id].append(cur_camera_xform)
                     cur_camera_path = cur_camera_xform_path + args_info["path"]
-                    cur_camera_resolution = args_info["resolution"]
+                    cur_camera_resolution = resolve_camera_resolution(
+                        camera_name, args_info["resolution"], self.wrist_camera_resolution
+                    )
                     cur_camera = Camera(
                         prim_path=cur_camera_path,
                         resolution=cur_camera_resolution,
@@ -312,7 +335,9 @@ class CameraManager:
                     )
                     self.cameras_xform[env_id].append(cur_camera_xform)
                     cur_camera_path = cur_camera_xform_path + f"/{camera_name}"
-                    cur_camera_resolution = args_info["resolution"]
+                    cur_camera_resolution = resolve_camera_resolution(
+                        camera_name, args_info["resolution"], self.wrist_camera_resolution
+                    )
                     cur_camera = Camera(
                         prim_path=cur_camera_path,
                         resolution=cur_camera_resolution,
