@@ -105,34 +105,46 @@ class TiledCaptureManager:
                 for annotator_name, annotator_setting in annotators.items():
                     type_annotator = annotator_setting["type"]
                     self.annotator_type[cam_id].append(type_annotator)
-            prim_paths_by_cam_id = [row[cam_id] for row in self.camera_prim_paths]
 
-            camera_resolution = self.cameras[0][cam_id]._resolution
-            height, width = camera_resolution[1], camera_resolution[0]
+        # Multi-env capture groups cameras by render resolution: one tiled
+        # product per resolution group, retargeted to each camera type in the
+        # group during capture. Only the product being captured has updates
+        # enabled, so no two products ever render at the same time (that is
+        # what loses materials in Isaac 5.1; coexisting gated products do not).
+        self._view_of_cam = {}
+        view_resolutions = []
+        for cam_id in range(len(self.camera_names[0])):
+            camera_resolution = tuple(self.cameras[0][cam_id]._resolution)
             if self.num_envs > 1:
-                # One tiled product is reused across camera types. Mixing head
-                # and wrist cameras in one tile set changes their projection;
-                # separate simultaneous products can lose materials in Isaac 5.1.
-                if any(tuple(camera._resolution) != tuple(camera_resolution)
-                       for row in self.cameras for camera in row):
-                    raise ValueError("Multi-env capture requires equal camera resolutions")
-                if cam_id > 0:
-                    if self.annotator_type[cam_id] != self.annotator_type[0]:
-                        raise ValueError("Multi-env capture requires matching camera annotators")
+                if camera_resolution in view_resolutions:
+                    view_id = view_resolutions.index(camera_resolution)
+                    group_first = next(i for i, v in self._view_of_cam.items() if v == view_id)
+                    if self.annotator_type[cam_id] != self.annotator_type[group_first]:
+                        raise ValueError("Multi-env capture requires matching camera annotators per resolution group")
+                    self._view_of_cam[cam_id] = view_id
                     continue
+                view_id = len(view_resolutions)
+                self._view_of_cam[cam_id] = view_id
+            else:
+                view_id = cam_id
+                self._view_of_cam[cam_id] = view_id
+            view_resolutions.append(camera_resolution)
+            height, width = camera_resolution[1], camera_resolution[0]
+            prim_paths_by_cam_id = [row[cam_id] for row in self.camera_prim_paths]
             tiled_camera = CameraView(
                 prim_paths_by_cam_id,
-                name=f"independent_camera_{cam_id}",
+                name=f"independent_camera_{view_id}",
                 camera_resolution=[width, height],
                 output_annotators=self.annotator_type[cam_id],
             )
             self.tiled_cameras.append(tiled_camera)
             self.tiled_render_products.append(tiled_camera._render_product)
             if self.num_envs > 1:
-                tiled_camera._render_product.hydra_texture.set_updates_enabled(True)
+                # Gated per capture in step(); never leave two products hot.
+                tiled_camera._render_product.hydra_texture.set_updates_enabled(False)
 
-            # Pre-allocate output buffers for this camera's annotators
-            self._output_buffers[cam_id] = {}
+            # Pre-allocate output buffers for this view's annotators
+            self._output_buffers[view_id] = {}
 
             for annotator_name in self.annotator_type[cam_id]:
                 from env.camera_manager.capture.camera_view import ANNOTATOR_SPEC
@@ -147,7 +159,7 @@ class TiledCaptureManager:
                 # Pre-allocate warp array on CUDA to reuse memory
                 import warp as wp
 
-                self._output_buffers[cam_id][annotator_name] = wp.zeros(shape, dtype=spec["dtype"], device="cuda:0")
+                self._output_buffers[view_id][annotator_name] = wp.zeros(shape, dtype=spec["dtype"], device="cuda:0")
 
     @property
     def render_in_step(self):
@@ -167,13 +179,22 @@ class TiledCaptureManager:
         start_time = context.current_time
         data = []
         stage = omni.usd.get_context().get_stage()
-        product = stage.GetPrimAtPath(self.tiled_render_products[0].path)
+        last_view = None
         for cam_id in cam_ids:
+            view_id = self._view_of_cam[cam_id]
+            product_prim = stage.GetPrimAtPath(self.tiled_render_products[view_id].path)
+            if view_id != last_view:
+                if last_view is not None:
+                    self.tiled_render_products[last_view].hydra_texture.set_updates_enabled(False)
+                self.tiled_render_products[view_id].hydra_texture.set_updates_enabled(True)
+                last_view = view_id
             paths = [row[cam_id] for row in self.camera_prim_paths]
             with Usd.EditContext(stage, stage.GetSessionLayer()):
-                product.GetRelationship("camera").SetTargets(paths)
+                product_prim.GetRelationship("camera").SetTargets(paths)
             wait_for_latest_cameras(context, min_passes=2)
             data.extend(self._read_camera(env_ids=env_ids, cam_ids=[cam_id]))
+        if last_view is not None:
+            self.tiled_render_products[last_view].hydra_texture.set_updates_enabled(False)
         if context.current_time != start_time:
             raise RuntimeError("Physics advanced during sequential camera capture")
         return data
@@ -199,7 +220,7 @@ class TiledCaptureManager:
         for cam_id in cam_ids:
             cam_data = {}
             annotator_names = self.annotator_type[cam_id]
-            view_id = 0 if self.num_envs > 1 else cam_id
+            view_id = self._view_of_cam[cam_id]
             for annotator_name in annotator_names:
                 pre_allocated_out = None
                 if view_id in self._output_buffers and annotator_name in self._output_buffers[view_id]:
