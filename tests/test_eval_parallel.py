@@ -52,9 +52,10 @@ class EvalParallelTests(unittest.TestCase):
             out = Path(tmp) / "run"
             keeper = subprocess.Popen(["sleep", "300"], start_new_session=True)
             try:
-                code = "import os,time,signal,sys; time.sleep(30)"
+                code = ("import os,sys,time; i=int(os.environ['EVAL_WORKER_INDEX']); "
+                        "time.sleep(1 if i == 0 else 60); sys.exit(0 if i else 3)")
                 rc = self.run_launcher("--workers", "2", "--output", str(out), "--",
-                                       sys.executable, "-c", code, timeout=30)
+                                       sys.executable, "-c", code, timeout=40)
                 self.assertNotEqual(rc.returncode, 0)
                 self.assertTrue((out / "FAILED").exists())
                 pids = [int((out / f"worker-{i}.pid").read_text()) for i in range(2)]
