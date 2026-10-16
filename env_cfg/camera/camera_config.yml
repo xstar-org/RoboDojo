@@ -1,8 +1,11 @@
-# Wrist cameras render directly at the policy composed wrist tile size
-# (about 114x120 inside the 240x416 training condition); rendering them at
-# full 640x480 only adds render cost before the resize. Set [640, 480] to
-# restore full-resolution wrist rendering.
-wrist_camera_resolution: [160, 120]
+# Optional: render wrist cameras at a lower target resolution for load testing.
+# The policy composes each wrist view into a ~114x120 tile of its 240x416
+# condition, so full 640x480 wrist rendering mainly adds render cost.
+# Measured 2026-10-16 (32 env, offload VPP2): [160, 120] gives +58% total
+# throughput and preserves cover_blocks 3/3, but build_tower drops 3/3 -> 0/3
+# (wrist detail sensitivity), so the default keeps the original resolution.
+wrist_camera_resolution: [640, 480]
+
 
 annotator:
   common:

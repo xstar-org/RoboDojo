@@ -53,7 +53,7 @@ class WristResolutionTests(unittest.TestCase):
 
     def test_yaml_exposes_the_override(self):
         text = (REPO / "env_cfg" / "camera" / "camera_config.yml").read_text(encoding="utf-8")
-        self.assertIn("wrist_camera_resolution: [160, 120]", text)
+        self.assertIn("wrist_camera_resolution: [640, 480]", text)
 
 
 if __name__ == "__main__":
