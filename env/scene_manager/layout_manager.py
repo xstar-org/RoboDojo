@@ -1,5 +1,6 @@
 from collections.abc import Mapping as ABCMapping, Sequence
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import dataclass
 import json
 import os
@@ -17,6 +18,8 @@ import transforms3d as t3d
 
 from env.global_configs import *
 from env.seeding import seed_everywhere
+from utils.cpu_snapshot import cpu_snapshot
+from utils.pose_snapshot import local_poses_from_world
 from utils.cluttered_generator import ClutteredGenerator
 from utils.load_file import *
 from utils.path import deep_resolve_paths, get_mdl_paths_from_folder, get_usd_paths_from_folder, resolve_path
@@ -62,6 +65,8 @@ class LayoutManager:
         task_config: DictConfig = None,
     ):
         self.scene_manager = None
+        self._cpu_poses = None
+        self._projected_bbox_cache = None
         self._far_idx = 0
         self.num_envs = num_envs
         self.env_spacing = env_spacing
@@ -418,12 +423,79 @@ class LayoutManager:
                     label_list.append(label)
         return label_list
 
+    @contextmanager
+    def cpu_poses(self):
+        """Batch object poses before CPU reward predicates inspect environments."""
+        previous = self._cpu_poses
+        previous_bbox_cache = self._projected_bbox_cache
+        values = {}
+        rigid_entries = []
+        parent_cache = None
+        from pxr import Usd, UsdGeom
+
+        # Parent transforms belong to this reward call, never to a prior step.
+        parent_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+        for env_idx, instances in enumerate(self.instance_type_by_env):
+            for name, kind in instances.items():
+                if kind in ("rigid", "articulation", "garment", "geometry"):
+                    obj = None
+                    if kind == "rigid":
+                        obj = self.get_scene_object(env_idx, name)
+                    view = getattr(obj, "_prim_view", None)
+                    if kind == "rigid" and view is not None and view.is_physics_handle_valid():
+                        pos, rot = obj.get_world_pose()
+                        values[(env_idx, name, "world_pos")] = pos
+                        values[(env_idx, name, "world_rot")] = rot
+                        parent = obj.stage.GetPrimAtPath(obj._prim_path).GetParent()
+                        matrix = np.asarray(parent_cache.GetLocalToWorldTransform(parent), dtype=np.float32)
+                        rigid_entries.append((env_idx, name, matrix))
+                        continue
+                    pos, rot = self._instance_pose(env_idx, name)
+                    values[(env_idx, name, "pos")] = pos
+                    values[(env_idx, name, "rot")] = rot
+        values["origins"] = self.scene_manager.env_origins
+        snapshot = cpu_snapshot(values)
+        if rigid_entries:
+            parents = np.stack([entry[2] for entry in rigid_entries])
+            positions = np.stack([snapshot[(idx, name, "world_pos")] for idx, name, _ in rigid_entries])
+            orientations = np.stack([snapshot[(idx, name, "world_rot")] for idx, name, _ in rigid_entries])
+            positions, orientations = local_poses_from_world(parents, positions, orientations)
+            for index, (idx, name, _) in enumerate(rigid_entries):
+                snapshot[(idx, name, "pos")] = positions[index]
+                snapshot[(idx, name, "rot")] = orientations[index]
+        self._cpu_poses = snapshot
+        self._projected_bbox_cache = {}
+        try:
+            yield
+        finally:
+            self._cpu_poses = previous
+            self._projected_bbox_cache = previous_bbox_cache
+
+    def _instance_pose(self, env_idx, inst_name):
+        kind = self.instance_type_by_env[env_idx].get(inst_name)
+        obj = self.get_scene_object(env_idx, inst_name)
+        if kind in ("rigid", "articulation"):
+            pos, rot, _ = obj._get_object_transform()
+            return pos, rot
+        if kind in ("garment", "geometry"):
+            pose = obj.get_state(is_relative=True)["root_pose"]
+            return pose[:3], pose[3:]
+        return None, None
+
     def get_instance_pose(self, env_idx: int, label: str = None, inst_name: str = None, relative: bool = True):
         if inst_name is None:
             inst_name = self.get_instance_name(env_idx, label)
         if inst_name is None:
             print(f"No instance found with label {label} or inst_name {inst_name} in env {env_idx}.")
             return (None, None)
+        key = (env_idx, inst_name, "pos")
+        if self._cpu_poses is not None and key in self._cpu_poses:
+            pos = self._cpu_poses[key].copy()
+            rot = self._cpu_poses[(env_idx, inst_name, "rot")].copy()
+            # Match the original garment/geometry semantics, including relative=False.
+            if not relative and self.instance_type_by_env[env_idx].get(inst_name) in ("rigid", "articulation"):
+                pos += self._cpu_poses["origins"][env_idx]
+            return pos, rot
         instance_type = self.instance_type_by_env[env_idx].get(inst_name, None)
         obj = self.get_scene_object(env_idx, inst_name)
         if instance_type in ["rigid", "articulation"]:
@@ -450,6 +522,24 @@ class LayoutManager:
         if desc_data is None:
             return []
         return desc_data
+
+    def get_instance_projected_bbox(self, inst_name, env_idx):
+        """Reuse a footprint only within the current frozen reward-state scope."""
+        key = (env_idx, inst_name)
+        cache = self._projected_bbox_cache
+        if cache is not None and key in cache:
+            return cache[key]
+        pos, rot = self.get_instance_pose(env_idx=env_idx, inst_name=inst_name)
+        vertices = self.get_instance_bbox_vertices(inst_name=inst_name, env_idx=env_idx)
+        if pos is None or rot is None or vertices is None:
+            return None
+        projected = calc_polygon(
+            origin_pose=np.concatenate([pos, rot]),
+            origin_bbox_points=np.asarray(vertices, dtype=float).reshape(-1, 3),
+        )
+        if cache is not None:
+            cache[key] = projected
+        return projected
 
     def get_instance_bbox_vertices(self, inst_name, env_idx):
         obj = self.get_scene_object(env_idx, inst_name)

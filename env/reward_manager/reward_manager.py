@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+import os
+
 from typing import Any, List, Tuple
 
 from env.reward_manager.func_parser import Func_Parser
@@ -6,6 +9,10 @@ from utils.transformer import safe_deepcopy_keep_callable
 
 class RewardManager:
     def __init__(self, num_envs):
+        mode = os.environ.get("ROBODOJO_BATCH_REWARD", "1")
+        if mode not in {"0", "1"}:
+            raise ValueError("ROBODOJO_BATCH_REWARD must be 0 or 1")
+        self._batch_reward = mode == "1"
         self.num_envs = num_envs
         self.env = None
         self.func_parser = Func_Parser(num_envs)
@@ -58,7 +65,20 @@ class RewardManager:
         self.env = env
         self.func_parser.initialize(env)
 
+    @contextmanager
+    def _reward_snapshot(self):
+        """Freeze state only during synchronous reward evaluation."""
+        if not self._batch_reward:
+            yield
+            return
+        with self.env.scene_manager.layout_manager.cpu_poses(), self.env.robot_manager.cpu_state(poses=True):
+            yield
+
     def init_state(self):
+        with self._reward_snapshot():
+            return self._snapshot_init_state()
+
+    def _snapshot_init_state(self):
         self.func_parser.init_state()
 
     def check(self, check_list: List[Tuple[Any, ...] | List[Tuple[Any, ...]]]):
@@ -355,6 +375,10 @@ class RewardManager:
         score_entries[env_idx] = still_pending
 
     def step(self, env_idx_list=None):
+        with self._reward_snapshot():
+            return self._snapshot_step(env_idx_list)
+
+    def _snapshot_step(self, env_idx_list=None):
         if env_idx_list is None:
             env_idx_list = range(self.num_envs)
 
@@ -525,6 +549,12 @@ class RewardManager:
             )
 
     def get_reward(self, final_check=True):
+        if not final_check:
+            return self._snapshot_get_reward(False)
+        with self._reward_snapshot():
+            return self._snapshot_get_reward(final_check)
+
+    def _snapshot_get_reward(self, final_check=True):
         reward_lst = []
         if final_check:
             self._final_check()

