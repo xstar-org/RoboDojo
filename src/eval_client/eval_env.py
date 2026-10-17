@@ -273,7 +273,15 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 env_idx_list = list(range(self.num_envs))
             if self.physx_monitor_enabled:
                 self._check_endpose_finite(env_idx_list)
-            self.obs_manager.render_for_capture()
+            # If start_capture was called after the last physics step,
+            # finish_capture reads the pre-rendered frame (GPU was busy
+            # during reward/IK/policy wait). Otherwise it falls back to
+            # the original sequential capture.
+            capture = getattr(self.obs_manager, 'capture_manager', None)
+            if capture is not None and hasattr(capture, 'finish_capture'):
+                capture.finish_capture(env_ids=env_idx_list)
+            else:
+                self.obs_manager.render_for_capture()
             data = self.obs_manager.get_obs(env_idx_list=env_idx_list)
             data_list = []
             for env_idx in env_idx_list:
@@ -453,6 +461,14 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                     if self.physx_monitor_enabled:
                         self._check_physx_broken_envs()
                         self._check_endpose_finite(env_idx_list)
+
+            # Start camera render now (GPU) while reward/IK/RPC run on CPU.
+            # The render sees the post-physics state; finish_capture() in the
+            # next get_obs_batch reads the result without re-waiting.
+            try:
+                self.obs_manager.capture_manager.start_capture()
+            except Exception:
+                pass  # fall back to sequential capture if pipeline unavailable
 
             self.reward_manager.step(env_idx_list=env_idx_list)
             if getattr(self, "interact", False):

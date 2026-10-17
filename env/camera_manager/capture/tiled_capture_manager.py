@@ -178,6 +178,68 @@ class TiledCaptureManager:
             raise RuntimeError("Physics advanced during sequential camera capture")
         return data
 
+    def start_capture(self, env_ids=None, cam_ids=None):
+        """Enable render products after physics settles; return immediately.
+
+        The GPU starts rendering concurrently with the caller's CPU work
+        (reward, IK, policy RPC). Call finish_capture() to read the result.
+        """
+        if cam_ids is None:
+            cam_ids = list(range(self.num_cams))
+        context = self.sim.sim
+        self._pipeline_start_time = context.current_time
+        self._pipeline_cam_ids = cam_ids
+        self._pipeline_env_ids = env_ids
+        last_view = None
+        for cam_id in cam_ids:
+            view_id = self._view_of_cam[cam_id]
+            texture = self.tiled_render_products[view_id].hydra_texture
+            if view_id != last_view:
+                if last_view is not None:
+                    self.tiled_render_products[last_view].hydra_texture.set_updates_enabled(False)
+                texture.set_updates_enabled(True)
+                last_view = view_id
+        self._pipeline_last_view = last_view
+
+    def finish_capture(self, env_ids=None, cam_ids=None):
+        """Wait for the render started by start_capture, read and disable.
+
+        If start_capture was not called, behaves like the original step().
+        """
+        from env.camera_manager.capture.render_sync import wait_for_latest_cameras
+
+        if not hasattr(self, '_pipeline_cam_ids'):
+            return self.step(env_ids=env_ids, cam_ids=cam_ids)
+        context = self.sim.sim
+        if context.current_time != self._pipeline_start_time:
+            self._disable_pipeline_products()
+            del self._pipeline_cam_ids
+            raise RuntimeError("Physics advanced during pipelined camera capture")
+        cam_ids = self._pipeline_cam_ids
+        data = []
+        last_view = None
+        for cam_id in cam_ids:
+            view_id = self._view_of_cam[cam_id]
+            texture = self.tiled_render_products[view_id].hydra_texture
+            if view_id != last_view:
+                if last_view is not None:
+                    self.tiled_render_products[last_view].hydra_texture.set_updates_enabled(False)
+                texture.set_updates_enabled(True)
+                last_view = view_id
+            wait_for_latest_cameras(context, min_passes=2)
+            data.extend(self._read_camera(env_ids=self._pipeline_env_ids, cam_ids=[cam_id]))
+        self._disable_pipeline_products()
+        if context.current_time != self._pipeline_start_time:
+            del self._pipeline_cam_ids
+            raise RuntimeError("Physics advanced during pipelined camera capture")
+        del self._pipeline_cam_ids
+        return data
+
+    def _disable_pipeline_products(self):
+        if hasattr(self, '_pipeline_last_view') and self._pipeline_last_view is not None:
+            self.tiled_render_products[self._pipeline_last_view].hydra_texture.set_updates_enabled(False)
+            self._pipeline_last_view = None
+
     def _read_camera(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
         """
         Step the annotator. When env_id and cam_id is given, use the given. Otherwise apply to all cameras.
