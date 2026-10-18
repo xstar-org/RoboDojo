@@ -375,6 +375,10 @@ def main():
 
         except UnStableError:
             env.seed_manager.eval_step()
+        except ConnectionError:
+            # An unavailable policy is not an unstable layout. Preserve the
+            # connection failure instead of silently skipping this episode.
+            raise
         except Exception as e:
             import traceback
 
