@@ -139,16 +139,11 @@ if [[ -z "${ROBODOJO_RUN_ID:-}" ]]; then
 fi
 echo "[eval_policy] ROBODOJO_RUN_ID=${ROBODOJO_RUN_ID}"
 
-client_entry=src/eval_client/main.py
-if [[ -n "${ROBODOJO_POLICY_READY_FILE:-}" ]]; then
-  client_entry=scripts/internal/parallel_ready_client.py
-fi
-
 MAX_BASH_RETRIES="${ROBODOJO_MAX_BASH_RETRIES:-10}"
 attempt=0
 while : ; do
   set +e
-  python -u "$client_entry" \
+  python -u src/eval_client/main.py \
     --task_name "$task_name" \
     --env_cfg_type "$env_cfg_type" \
     --num_envs "$num_envs" \
