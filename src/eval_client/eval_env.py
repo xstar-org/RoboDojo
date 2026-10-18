@@ -14,7 +14,6 @@ from env.global_configs import *
 from env.global_configs import BENCHMARK
 from env.observation_manager.obs_manager import ObsManager
 from env.seed_manager.seed_manager import SeedManager
-from src.eval_client.policy_ready import wait_for_policy_ready
 from utils.cluttered_generator import UnStableError
 from utils.pipeline_utils import get_robot_action_dim_info
 from utils.save_file import VideoStreamWriter, format_video_saved_message, save_json
@@ -195,11 +194,9 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 ws_ping_interval_s=self.deploy_cfg.get("ws_ping_interval_s", 20.0),
                 ws_ping_timeout_s=self.deploy_cfg.get("ws_ping_timeout_s", 20.0),
             )
-            # Standalone clients keep their existing eager connection. A launcher
-            # marker defers connection until the first scene has finished reset.
+            # Connect only after scene initialization. WsModelClient already
+            # retries while the policy is loading and its port is not open.
             self.model_client = None
-            if not os.environ.get("ROBODOJO_POLICY_READY_FILE"):
-                self.model_client = WsModelClient(**self._model_client_kwargs)
             self.robot_action_dim_info = get_robot_action_dim_info(env_cfg=self.eval_cfg)
 
         def close(self):
@@ -249,7 +246,6 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             self.reward_manager.init_state()
 
             if self.model_client is None:
-                wait_for_policy_ready()
                 self.model_client = WsModelClient(**self._model_client_kwargs)
             self.model_client.call(func_name="reset")
 

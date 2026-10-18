@@ -148,16 +148,21 @@ Released under the [RoboDojo Non-Commercial Research License](LICENSE). RoboDojo
 ### Parallel model and simulation startup / 模型与仿真并行初始化
 
 `bash scripts/robodojo.sh eval ...` starts the policy server and simulation together.
-After scene warmup, robot initialization, and reward initialization, the ordinary client waits for this invocation's
-`SERVER_READY` marker before opening the WebSocket. The launcher publishes the marker
-after the bundled server (which loads its model before listening) is listening.
-The server itself does not write this file. No alternate Python entry or lazy client proxy is used.
-A failed server or a 600-second readiness timeout stops the client as well.
-Standalone `client` commands keep their existing connection behavior.
-This changes startup ordering only; it does not change observations, physics, actions,
-model settings, or the evaluation workload. Startup speedup must be measured separately.
+After scene warmup, robot initialization, and reward initialization, the environment
+constructs the ordinary WebSocket client. Its existing connection retry waits while
+the policy model is loading and the target URL is not listening yet; connection and
+HELLO must succeed before the first reset RPC. Later episodes reuse this client.
+The bundled XPolicyLab server loads its model before listening. No ready file,
+extra port probe, alternate Python entry, or lazy proxy is needed.
 
-`eval` 同时启动模型与仿真，仿真完成场景初始化后，在首次 RPC 前等待本次运行的
-`SERVER_READY`，再建立 WebSocket 连接。内置服务先加载模型再监听端口；启动器确认
-监听后由 RoboDojo 启动器发布就绪标记，服务本身不写该文件；无需替换 Python 入口或使用延迟客户端代理。服务失败或等待 600 秒超时会清理客户端。独立 `client` 命令保持
-现有行为。该改动只改变启动顺序，不改变观测、物理、动作或模型配置，初始化收益需单独实测。
+The launcher preserves the client's exit status and cleans up both process trees.
+If the server exits before the client finishes, evaluation fails and the waiting
+client is stopped. The launcher uses Bash5.1 or newer (`wait -n -p`).
+This only changes startup ordering; observations, physics, actions and model settings
+are unchanged. Initialization speedup must be measured separately.
+
+`eval` 同时启动模型与仿真。场景预热、机器人和奖励初始化结束后，再构造原 WebSocket
+客户端；复用其现有重试，等待目标服务加载完成、开始监听并完成 HELLO，再发 reset。
+后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
+探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
+启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。

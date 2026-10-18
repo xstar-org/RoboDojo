@@ -69,9 +69,6 @@ _kill_process_tree() {
   kill "-${sig}" "${pid}" 2>/dev/null || true
 }
 
-ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/robodojo-ready.XXXXXXXX")"
-export ROBODOJO_POLICY_READY_FILE="${ready_dir}/SERVER_READY"
-
 cleanup() {
   # Prevent re-entry from nested EXIT after INT/TERM.
   trap '' EXIT INT TERM
@@ -80,7 +77,6 @@ cleanup() {
     wait "${CLIENT_PID}" 2>/dev/null || true
     CLIENT_PID=""
   fi
-  rm -rf -- "${ready_dir}"
   if [[ -n "${SERVER_PID:-}" ]]; then
     echo "[MAIN] kill server tree ${SERVER_PID}"
     _kill_process_tree "${SERVER_PID}" TERM
@@ -132,18 +128,26 @@ bash "${CLIENT_SCRIPT}" \
   "${policy_server_ip}" &
 CLIENT_PID=$!
 
-bash "${UTILS_DIR}/wait_for_policy_server.sh" \
-  "${policy_server_ip}" \
-  "${policy_server_port}" \
-  "${SERVER_PID}" \
-  "Policy server" \
-  600
-
-# The bundled WS policy server loads its model before binding the listening port.
-# A fresh per-run marker prevents a stale READY from releasing a new client.
-touch "${ROBODOJO_POLICY_READY_FILE}"
-echo "[MAIN] SERVER_READY; simulation client may connect"
-wait "${CLIENT_PID}"
+# Either child may fail first. Keep the client's actual exit code, including
+# when both children finish together; a server-only exit is not eval success.
+finished_pid=""
+status=0
+wait -n -p finished_pid "${SERVER_PID}" "${CLIENT_PID}" || status=$?
+if [[ -z "${finished_pid:-}" ]]; then
+  # Both children may already have exited before wait -n starts.
+  status=0
+  wait "${CLIENT_PID}" || status=$?
+elif [[ "${finished_pid:-}" == "${SERVER_PID}" ]]; then
+  if kill -0 "${CLIENT_PID}" 2>/dev/null; then
+    echo "[MAIN] policy server exited before the evaluation client" >&2
+    exit 1
+  fi
+  status=0
+  wait "${CLIENT_PID}" || status=$?
+fi
 CLIENT_PID=""
+if (( status != 0 )); then
+  exit "${status}"
+fi
 
 echo "[MAIN] eval finished"
