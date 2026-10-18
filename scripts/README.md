@@ -89,3 +89,17 @@ Container install and smoke tests live under [../docker/](../docker/), not here.
 ## Policy-specific scripts
 
 Training, data prep, and per-policy `eval.sh` live in [../XPolicyLab/policy/](../XPolicyLab/policy/) (submodule).
+
+### Policy connection during client startup
+
+The evaluation client prepares and resets the simulation scene before opening
+its policy connection. Its first `reset` RPC performs the usual WebSocket
+handshake; later RPCs keep their original order. Connection failures are raised
+at that first RPC.
+
+When launching a separate policy server and simulation workers, start their
+processes concurrently to overlap model loading and scene preparation. A launch
+script that waits for the server before starting clients still works, but it
+cannot benefit from this overlap. This change does not reduce scene warm-up,
+physics steps, camera captures, or model initialization. Reusing a running server
+avoids model loading independently of this change.

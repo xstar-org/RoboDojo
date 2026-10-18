@@ -17,6 +17,7 @@ from env.seed_manager.seed_manager import SeedManager
 from utils.cluttered_generator import UnStableError
 from utils.pipeline_utils import get_robot_action_dim_info
 from utils.save_file import VideoStreamWriter, format_video_saved_message, save_json
+from src.eval_client.deferred_policy_client import DeferredPolicyClient
 
 
 def _patch_websockets_proxy_compat():
@@ -185,7 +186,8 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             evaluation_id = self.deploy_cfg.get("evaluation_id", self.run_id)
             trial_id = self.deploy_cfg.get("trial_id", f"{self.task_name}-{self.run_id}")
             action_case_id = self.deploy_cfg.get("action_case_id", f"{self.task_name}_case")
-            self.model_client = WsModelClient(
+            self.model_client = DeferredPolicyClient(
+                WsModelClient,
                 url=policy_server_url,
                 evaluation_id=evaluation_id,
                 trial_id=trial_id,
