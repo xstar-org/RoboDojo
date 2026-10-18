@@ -42,4 +42,19 @@ class StartupOrdering(unittest.TestCase):
    c=m.WsModelClient()
    with self.assertRaisesRegex(ValueError,'handshake failed'):c.call('reset')
 
+class EntryNamespace(unittest.TestCase):
+ def test_entry_uses_main_module_globals_and_preserves_restart_path(self):
+  import os, shutil, subprocess, sys
+  with tempfile.TemporaryDirectory() as d:
+   root=pathlib.Path(d);entry=root/'scripts/internal/parallel_ready_client.py';entry.parent.mkdir(parents=True)
+   shutil.copy(_spec.origin,entry)
+   target=root/'src/eval_client/main.py';target.parent.mkdir(parents=True)
+   target.write_text("import sys\nfrom pathlib import Path\nassert globals() is vars(sys.modules['__main__']), 'SDK module globals differ'\nassert Path(sys.argv[0]).name == 'parallel_ready_client.py', 'restart lost launcher'\nprint('ENTRY_NAMESPACE_OK')\n")
+   client=root/'client_server/ws/model_client.py';client.parent.mkdir(parents=True)
+   client.write_text('class WsModelClient: pass\n')
+   ready=root/'SERVER_READY';ready.touch()
+   result=subprocess.run([sys.executable,str(entry)],env=dict(os.environ,PYTHONPATH=str(root),ROBODOJO_POLICY_READY_FILE=str(ready)),capture_output=True,text=True,timeout=10)
+   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+   self.assertIn('ENTRY_NAMESPACE_OK',result.stdout)
+
 if __name__=='__main__':unittest.main()
