@@ -1,20 +1,14 @@
 """CPU contracts for the actual EvalEnv reset and launcher readiness helper."""
 import ast
-import importlib.util
 import os
 from pathlib import Path
-import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("policy_ready", ROOT / "src/eval_client/policy_ready.py")
-ready_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ready_module)
 
 
-def eval_env_methods(events, client_class, wait):
+def eval_env_methods(events, client_class):
     source = ast.parse((ROOT / "src/eval_client/eval_env.py").read_text())
     factory = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == "create_eval_env")
     original = next(n for n in factory.body if isinstance(n, ast.ClassDef))
@@ -24,14 +18,14 @@ def eval_env_methods(events, client_class, wait):
             events.append("simulation_reset")
     cls = ast.ClassDef(name="TestEnv", bases=[ast.Name(id="Base", ctx=ast.Load())], keywords=[], body=[reset], decorator_list=[])
     module = ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[]))
-    ns = dict(Base=Base, WsModelClient=client_class, wait_for_policy_ready=wait)
+    ns = dict(Base=Base, WsModelClient=client_class)
     exec(compile(module, str(ROOT / "src/eval_client/eval_env.py"), "exec"), ns)
     return ns["TestEnv"], original
 
 
 class ReadyAfterScene(unittest.TestCase):
-    def make_env(self, events, client_class, wait):
-        cls, original = eval_env_methods(events, client_class, wait)
+    def make_env(self, events, client_class):
+        cls, original = eval_env_methods(events, client_class)
         env = cls()
         env.num_envs = 1
         env.model_client = None
@@ -45,7 +39,7 @@ class ReadyAfterScene(unittest.TestCase):
         env.reward_manager = SimpleNamespace(init_state=lambda: events.append("reward_init"))
         return env, original
 
-    def test_wait_then_real_connection_after_complete_scene_reset(self):
+    def test_real_connection_after_complete_scene_reset(self):
         events = []
         class Client:
             def __init__(self, **kwargs):
@@ -53,33 +47,20 @@ class ReadyAfterScene(unittest.TestCase):
                 self.kwargs = kwargs
             def call(self, **kwargs):
                 events.append(("rpc", kwargs))
-        env, _ = self.make_env(events, Client, lambda: events.append("wait_ready"))
+        env, _ = self.make_env(events, Client)
         env.reset([0])
-        self.assertEqual(events, ["simulation_reset", "setup_scene", "origin", "robot_init", "reward_init", "wait_ready", "connect", ("rpc", {"func_name": "reset"})])
+        self.assertEqual(events, ["simulation_reset", "setup_scene", "origin", "robot_init", "reward_init", "connect", ("rpc", {"func_name": "reset"})])
         self.assertEqual(env.model_client.kwargs, env._model_client_kwargs)
         first_client = env.model_client
         env.reset([1])
         self.assertIs(env.model_client, first_client)
         self.assertEqual(events.count("connect"), 1)
-        self.assertEqual(events.count("wait_ready"), 1)
-
-    def test_timeout_prevents_connection_and_rpc(self):
-        events = []
-        def forbidden(**kwargs):
-            self.fail("client must not connect before READY")
-        def timeout():
-            raise TimeoutError("model not ready")
-        env, _ = self.make_env(events, forbidden, timeout)
-        with self.assertRaises(TimeoutError):
-            env.reset([0])
-        self.assertEqual(events[-1], "reward_init")
-        self.assertIsNone(env.model_client)
 
     def test_connection_failure_leaves_safe_close_state(self):
         events = []
         def failed(**kwargs):
             raise ConnectionError("handshake failed")
-        env, _ = self.make_env(events, failed, lambda: events.append("wait_ready"))
+        env, _ = self.make_env(events, failed)
         with self.assertRaisesRegex(ConnectionError, "handshake failed"):
             env.reset([0])
         self.assertIsNone(env.model_client)
@@ -90,39 +71,38 @@ class ReadyAfterScene(unittest.TestCase):
         exec(compile(ast.fix_missing_locations(ast.Module(body=[close], type_ignores=[])), "actual_close", "exec"), ns)
         ns["_close_model_client"](env)
 
-    def test_constructor_preserves_standalone_eager_connection(self):
+    def test_constructor_only_records_original_connection_parameters(self):
         events = []
-        class Client:
-            def __init__(self, **kwargs):
-                events.append(kwargs)
-        _, original = self.make_env(events, Client, lambda: None)
+        def forbidden(**kwargs):
+            self.fail("constructor must not connect before scene initialization")
+        _, original = self.make_env(events, forbidden)
         init = next(n for n in original.body if isinstance(n, ast.FunctionDef) and n.name == "__init__")
-        start = next(i for i, n in enumerate(init.body) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "model_client" for t in n.targets))
-        block = ast.fix_missing_locations(ast.Module(body=init.body[start:start + 2], type_ignores=[]))
-        env = SimpleNamespace(_model_client_kwargs={"url": "ws://test"})
-        ns = dict(self=env, os=os, WsModelClient=Client)
-        with patch.dict(os.environ, {}, clear=True):
-            exec(compile(block, "actual_constructor", "exec"), ns)
-        self.assertIsInstance(env.model_client, Client)
-        with patch.dict(os.environ, {"ROBODOJO_POLICY_READY_FILE": "pending"}, clear=True):
-            exec(compile(block, "actual_constructor", "exec"), ns)
+        start = next(i for i, n in enumerate(init.body) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "_model_client_kwargs" for t in n.targets))
+        stop = next(i for i, n in enumerate(init.body) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "model_client" for t in n.targets))
+        block = ast.fix_missing_locations(ast.Module(body=init.body[start:stop + 1], type_ignores=[]))
+        env = SimpleNamespace(deploy_cfg={"repeat_index": 4, "ws_ping_interval_s": 13, "ws_ping_timeout_s": 21})
+        ns = dict(self=env, WsModelClient=forbidden, policy_server_url="ws://test", evaluation_id="eval", trial_id="trial", action_case_id="case")
+        exec(compile(block, "actual_constructor", "exec"), ns)
         self.assertIsNone(env.model_client)
-        self.assertEqual(len(events), 1)
+        self.assertEqual(env._model_client_kwargs, dict(url="ws://test", evaluation_id="eval", trial_id="trial", action_case_id="case", repeat_index=4, ws_ping_interval_s=13, ws_ping_timeout_s=21))
 
-
-class ReadyMarker(unittest.TestCase):
-    def test_direct_client_has_no_wait(self):
-        with patch.dict(os.environ, {}, clear=True):
-            ready_module.wait_for_policy_ready()
-
-    def test_only_marker_releases_wait(self):
-        with tempfile.TemporaryDirectory() as directory:
-            marker = Path(directory) / "SERVER_READY"
-            with patch.dict(os.environ, {"ROBODOJO_POLICY_READY_FILE": str(marker), "ROBODOJO_POLICY_READY_TIMEOUT": "0"}, clear=True):
-                with self.assertRaises(TimeoutError):
-                    ready_module.wait_for_policy_ready()
-                marker.touch()
-                ready_module.wait_for_policy_ready()
+    def test_main_propagates_connect_failure_without_advancing_layout(self):
+        main_source = ast.parse((ROOT / "src/eval_client/main.py").read_text())
+        main = next(n for n in main_source.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        loop = next(n for n in main.body if isinstance(n, ast.While))
+        actual_try = next(n for n in loop.body if isinstance(n, ast.Try))
+        advanced = []
+        def failed_reset(**kwargs):
+            raise ConnectionError("native client retry exhausted")
+        env = SimpleNamespace(env_seeds=[0], reset=failed_reset, seed_manager=SimpleNamespace(eval_step=lambda: advanced.append(True)))
+        ns = dict(env=env, enable_monitor=False,
+                  PhysXFatalError=type("PhysXFatalError", (Exception,), {}),
+                  PhysXBrokenError=type("PhysXBrokenError", (Exception,), {}),
+                  UnStableError=type("UnStableError", (Exception,), {}))
+        module = ast.fix_missing_locations(ast.Module(body=[actual_try], type_ignores=[]))
+        with self.assertRaisesRegex(ConnectionError, "native client retry exhausted"):
+            exec(compile(module, str(ROOT / "src/eval_client/main.py"), "exec"), ns)
+        self.assertEqual(advanced, [])
 
 
 if __name__ == "__main__":
