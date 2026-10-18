@@ -69,9 +69,18 @@ _kill_process_tree() {
   kill "-${sig}" "${pid}" 2>/dev/null || true
 }
 
+ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/robodojo-ready.XXXXXXXX")"
+export ROBODOJO_POLICY_READY_FILE="${ready_dir}/SERVER_READY"
+
 cleanup() {
   # Prevent re-entry from nested EXIT after INT/TERM.
   trap '' EXIT INT TERM
+  if [[ -n "${CLIENT_PID:-}" ]]; then
+    _kill_process_tree "${CLIENT_PID}" TERM
+    wait "${CLIENT_PID}" 2>/dev/null || true
+    CLIENT_PID=""
+  fi
+  rm -rf -- "${ready_dir}"
   if [[ -n "${SERVER_PID:-}" ]]; then
     echo "[MAIN] kill server tree ${SERVER_PID}"
     _kill_process_tree "${SERVER_PID}" TERM
@@ -107,13 +116,6 @@ echo "[MAIN] start server, policy_server_port=${policy_server_port}"
 
 SERVER_PID=$!
 
-bash "${UTILS_DIR}/wait_for_policy_server.sh" \
-  "${policy_server_ip}" \
-  "${policy_server_port}" \
-  "${SERVER_PID}" \
-  "Policy server" \
-  600
-
 echo "[MAIN] start client, server=${policy_server_ip}:${policy_server_port}"
 
 bash "${CLIENT_SCRIPT}" \
@@ -127,6 +129,21 @@ bash "${CLIENT_SCRIPT}" \
   "${eval_env_conda_env}" \
   "${additional_info}" \
   "${policy_server_port}" \
-  "${policy_server_ip}"
+  "${policy_server_ip}" &
+CLIENT_PID=$!
+
+bash "${UTILS_DIR}/wait_for_policy_server.sh" \
+  "${policy_server_ip}" \
+  "${policy_server_port}" \
+  "${SERVER_PID}" \
+  "Policy server" \
+  600
+
+# The bundled WS policy server loads its model before binding the listening port.
+# A fresh per-run marker prevents a stale READY from releasing a new client.
+touch "${ROBODOJO_POLICY_READY_FILE}"
+echo "[MAIN] SERVER_READY; simulation client may connect"
+wait "${CLIENT_PID}"
+CLIENT_PID=""
 
 echo "[MAIN] eval finished"
