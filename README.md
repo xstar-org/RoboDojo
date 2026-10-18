@@ -160,3 +160,12 @@ model settings, or the evaluation workload. Startup speedup must be measured sep
 `SERVER_READY`，再建立 WebSocket 连接。内置服务先加载模型再监听端口；启动器确认
 监听后发布就绪标记。服务失败或等待 600 秒超时会清理客户端。独立 `client` 命令保持
 现有行为。该改动只改变启动顺序，不改变观测、物理、动作或模型配置，初始化收益需单独实测。
+
+Custom Python launchers that recognize `src/eval_client/main.py` by filename must
+also recognize `scripts/internal/parallel_ready_client.py`. Keep their existing
+CUDA/Vulkan device selection and per-worker Kit cache isolation for both entries.
+The entry wrapper does not replace those environment-specific settings.
+
+如果自定义 Python 启动器按文件名识别 `src/eval_client/main.py`，也应识别
+`scripts/internal/parallel_ready_client.py`，对两种入口保留相同的 CUDA/Vulkan 设备选择
+和每个 worker 独立的 Kit 缓存。入口包装不会替代这些环境配置。
