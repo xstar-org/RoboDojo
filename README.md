@@ -143,3 +143,26 @@ Released under the [RoboDojo Non-Commercial Research License](LICENSE). RoboDojo
   <img alt="Isaac Lab 2.3" src="https://img.shields.io/badge/Isaac_Lab-2.3-475569?style=flat-square&logo=nvidia&logoColor=76B900&labelColor=64748b" height="22"/>&nbsp;
   <img alt="License Non-Commercial" src="https://img.shields.io/badge/License-Non--Commercial-475569?style=flat-square&labelColor=64748b" height="22"/>
 </p>
+
+
+### Parallel model and simulation startup / 模型与仿真并行初始化
+
+`bash scripts/robodojo.sh eval ...` starts the policy server and simulation together.
+After scene warmup, robot initialization, and reward initialization, the environment
+constructs the ordinary WebSocket client. Its existing connection retry waits while
+the policy model is loading and the target URL is not listening yet; connection and
+HELLO must succeed before the first reset RPC. Later episodes reuse this client.
+The bundled XPolicyLab server loads its model before listening. No ready file,
+extra port probe, alternate Python entry, or lazy proxy is needed.
+
+The launcher preserves the client's exit status and cleans up both process trees.
+If the server exits before the client finishes, evaluation fails and the waiting
+client is stopped. The launcher uses Bash5.1 or newer (`wait -n -p`).
+This only changes startup ordering; observations, physics, actions and model settings
+are unchanged. Initialization speedup must be measured separately.
+
+`eval` 同时启动模型与仿真。场景预热、机器人和奖励初始化结束后，再构造原 WebSocket
+客户端；复用其现有重试，等待目标服务加载完成、开始监听并完成 HELLO，再发 reset。
+后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
+探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
+启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。

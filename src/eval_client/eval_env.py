@@ -185,7 +185,7 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             evaluation_id = self.deploy_cfg.get("evaluation_id", self.run_id)
             trial_id = self.deploy_cfg.get("trial_id", f"{self.task_name}-{self.run_id}")
             action_case_id = self.deploy_cfg.get("action_case_id", f"{self.task_name}_case")
-            self.model_client = WsModelClient(
+            self._model_client_kwargs = dict(
                 url=policy_server_url,
                 evaluation_id=evaluation_id,
                 trial_id=trial_id,
@@ -194,6 +194,9 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 ws_ping_interval_s=self.deploy_cfg.get("ws_ping_interval_s", 20.0),
                 ws_ping_timeout_s=self.deploy_cfg.get("ws_ping_timeout_s", 20.0),
             )
+            # Connect only after scene initialization. WsModelClient already
+            # retries while the policy is loading and its port is not open.
+            self.model_client = None
             self.robot_action_dim_info = get_robot_action_dim_info(env_cfg=self.eval_cfg)
 
         def close(self):
@@ -242,6 +245,8 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             self.robot_manager.set_robot_init_state()
             self.reward_manager.init_state()
 
+            if self.model_client is None:
+                self.model_client = WsModelClient(**self._model_client_kwargs)
             self.model_client.call(func_name="reset")
 
         def setup_scene(self):
