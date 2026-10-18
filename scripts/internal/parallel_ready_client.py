@@ -60,8 +60,11 @@ def main():
     target = Path(__file__).resolve().parents[2] / "src/eval_client/main.py"
     # Keep this launcher as argv[0]: main.py's fatal execv restart must reinstall the gate.
     sys.path.insert(0, str(target.parents[2]))
-    exec(compile(target.read_bytes(), str(target), "exec"),
-         {"__name__": "__main__", "__file__": str(target), "__package__": None})
+    # SDK/config decorators resolve __main__ through sys.modules. Use that same
+    # dictionary, while keeping argv[0] on this launcher for execv retries.
+    namespace = globals()
+    namespace["__file__"] = str(target)
+    exec(compile(target.read_bytes(), str(target), "exec"), namespace)
 
 
 if __name__ == "__main__":
