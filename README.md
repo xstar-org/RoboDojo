@@ -125,3 +125,20 @@ Released under the [MIT License](LICENSE).
   <img alt="Isaac Lab 2.3" src="https://img.shields.io/badge/Isaac_Lab-2.3-475569?style=flat-square&logo=nvidia&logoColor=76B900&labelColor=64748b" height="22"/>&nbsp;
   <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-475569?style=flat-square&labelColor=64748b" height="22"/>
 </p>
+
+
+### Parallel model and simulation startup / 模型与仿真并行初始化
+
+`bash scripts/robodojo.sh eval ...` starts the policy server and simulation together.
+The client initializes its scene before its first RPC, then waits for this invocation's
+`SERVER_READY` marker before opening the WebSocket. The launcher publishes the marker
+after the bundled server (which loads its model before listening) is listening.
+A failed server or a 600-second readiness timeout stops the client as well.
+Standalone `client` commands keep their existing connection behavior.
+This changes startup ordering only; it does not change observations, physics, actions,
+model settings, or the evaluation workload. Startup speedup must be measured separately.
+
+`eval` 同时启动模型与仿真，仿真完成场景初始化后，在首次 RPC 前等待本次运行的
+`SERVER_READY`，再建立 WebSocket 连接。内置服务先加载模型再监听端口；启动器确认
+监听后发布就绪标记。服务失败或等待 600 秒超时会清理客户端。独立 `client` 命令保持
+现有行为。该改动只改变启动顺序，不改变观测、物理、动作或模型配置，初始化收益需单独实测。
