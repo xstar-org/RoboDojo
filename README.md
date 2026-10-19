@@ -166,3 +166,39 @@ are unchanged. Initialization speedup must be measured separately.
 后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
 探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
 启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。
+
+
+### Optional CUDA physics / 可选 CUDA 物理仿真
+
+The default simulation backend remains CPU. To opt in for a validated task, add
+the following entries to `env_cfg/sim/sim_config.yml` before launching evaluation:
+
+```yaml
+device: cuda:0
+use_fabric: true
+```
+
+`cuda:0` is relative to the process's visible CUDA devices. Set
+`CUDA_VISIBLE_DEVICES` to the intended simulation GPU and keep rendering on that
+same physical GPU. This is separate from the policy server's GPU.
+
+Layout and reward code consumes poses through NumPy. `get_instance_pose` returns
+rigid/articulation poses on CPU even when their physics tensors are on CUDA,
+matching its existing geometry/garment branch. Pose values, coordinate handling,
+physics timestep, control and cameras are unchanged. The GPU backend can still
+produce different trajectories from CPU physics.
+
+The finite check covered `build_tower` seed0/layout0–2: CPU and CUDA each passed
+3/3 with Score100 and full video decoding. With 32env, actual policy batch32,
+original 640×480 cameras, two GPUs and 32 logical CPUs, two reversed fixed-work
+windows measured total throughput 10.7569→11.7803 native steps/s (+9.51%).
+Non-policy action+observation throughput was 12.8457→14.3838 (+11.97%). These
+short windows are not complete 32-episode or all-task quality acceptance. The
+first CPU window preceded an intervening study, so the timing gap also limits
+causal interpretation. Validate other tasks before enabling CUDA physics there.
+
+默认仍使用 CPU 物理。对已验证任务，可在上面的配置文件显式开启 CUDA 与 Fabric。
+这里的 `cuda:0` 是进程可见设备中的逻辑编号，不是固定的物理 GPU0；仿真和渲染应选择
+同一物理卡，policy 使用另一张卡。此改动补齐 NumPy 布局/奖励消费者的 CPU pose 边界，
+不改变相机、控制、步长或模型设置。上述性能及效果结果仅覆盖所列配置与有限布局，
+不表示其他任务已经通过 GPU 物理效果验收。
