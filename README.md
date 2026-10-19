@@ -148,3 +148,10 @@ are unchanged. Initialization speedup must be measured separately.
 后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
 探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
 启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。
+
+### Camera resource lifetime
+
+Camera resets explicitly detach old annotators and destroy their owned render
+products before creating replacements. Closing the capture manager uses the
+same idempotent release path. Camera resolution, projection, frame delivery,
+physics and policy settings are preserved.
