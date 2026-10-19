@@ -10,6 +10,7 @@ import numpy as np
 import transforms3d as t3d
 import websockets
 
+from env.environment.usd_writeback import deferred_usd_writeback
 from env.global_configs import *
 from env.global_configs import BENCHMARK
 from env.observation_manager.obs_manager import ObsManager
@@ -453,11 +454,12 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
 
             if len(control_info_list) > 0:
                 self.robot_manager.control_manager.push(env_idx_list, control_info_list)
-                while not self.have_empty(env_idx_list):
-                    self.step(env_idx_list=env_idx_list)
-                    if self.physx_monitor_enabled:
-                        self._check_physx_broken_envs()
-                        self._check_endpose_finite(env_idx_list)
+                with deferred_usd_writeback(self, env_idx_list):
+                    while not self.have_empty(env_idx_list):
+                        self.step(env_idx_list=env_idx_list)
+                        if self.physx_monitor_enabled:
+                            self._check_physx_broken_envs()
+                            self._check_endpose_finite(env_idx_list)
 
             self.reward_manager.step(env_idx_list=env_idx_list)
             if getattr(self, "interact", False):

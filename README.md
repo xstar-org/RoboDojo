@@ -166,3 +166,19 @@ are unchanged. Initialization speedup must be measured separately.
 后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
 探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
 启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。
+
+
+### Optional CPU physics USD writeback deferral
+
+`ROBODOJO_DEFER_USD_WRITEBACK=1` keeps every interpolated control and physical
+step, but defers intermediate CPU physics transform output to USD until the
+last control group. USD output is restored before reward, interaction checks
+and observation. Native physics tensor reads used by control and safety remain
+current throughout the loop. The option defaults to off.
+
+CUDA/Fabric scenes, tasks overriding the per-step task callback, and interval
+event consumers retain the original writeback behavior. On exceptions, the
+original setting and step dispatch are restored; existing evaluation recovery
+resets the failed scene. The option does not change cameras, solver parameters,
+model inputs, dtype or physics step count. `env.usd_writeback_stats` records
+control groups that deferred or published transforms when the option is used.
