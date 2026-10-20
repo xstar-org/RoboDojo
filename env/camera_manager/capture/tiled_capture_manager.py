@@ -57,6 +57,20 @@ class TiledCaptureManager:
         self.num_cams = len(self.cameras[0])
         self.sim = sim
 
+    def _release_tiled_cameras(self):
+        """Release SDK resources before replacing their Python owners."""
+        error = None
+        for camera in self.tiled_cameras:
+            try:
+                camera._clean_up_tiled_sensor()
+            except Exception as exc:
+                if error is None:
+                    error = exc
+        self.tiled_cameras.clear()
+        self.tiled_render_products.clear()
+        if error is not None:
+            raise error
+
     def init_cameras(self):
         """
         Initialize cameras based on the configuration.
@@ -64,12 +78,11 @@ class TiledCaptureManager:
         2. Get all render_product control
         3. Attach Annotator
         """
+        self._release_tiled_cameras()
         self.camera_prim_paths.clear()
         self.annotator.clear()
         self.annotator_type.clear()
         self.annotator_device.clear()
-        self.tiled_cameras.clear()
-        self.tiled_render_products.clear()
         self._output_buffers.clear()
         for env_id in range(self.num_envs):
             self.camera_prim_paths.append([])
@@ -241,13 +254,11 @@ class TiledCaptureManager:
         This function will be called when we close the environment.
         """
 
+        self._release_tiled_cameras()
         self.annotator.clear()
         self.annotator_type.clear()
         self.annotator_device.clear()
-        self.tiled_cameras.clear()
         self.cameras.clear()
         self.camera_names.clear()
         self.sim = None
-        for rp in self.tiled_render_products:
-            rp.destroy()
         self.camera_prim_paths.clear()
