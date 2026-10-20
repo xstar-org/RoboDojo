@@ -367,7 +367,7 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             if env_idx_list is None:
                 env_idx_list = list(range(self.num_envs))
             batch_ik = None
-            if self.num_envs > 1 and os.environ.get("ROBODOJO_BATCH_IK", "0") == "1":
+            if self.num_envs > 1:
                 if len(set(env_idx_list)) != len(env_idx_list):
                     raise ValueError("Batched IK requires unique environment IDs")
                 batch_ik = {}
