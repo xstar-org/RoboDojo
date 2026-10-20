@@ -4,3 +4,7 @@ render_interval: 10
 scene:
   num_envs: 10
   env_spacing: 7
+
+# Defer intermediate CPU physics USD writes until the final control step.
+# Unsupported backends/tasks retain their original writeback behavior.
+defer_usd_writeback: false
