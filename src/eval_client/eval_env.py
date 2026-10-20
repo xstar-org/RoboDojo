@@ -366,13 +366,33 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             control_info_list = []
             if env_idx_list is None:
                 env_idx_list = list(range(self.num_envs))
-            for idx, env_idx in enumerate(env_idx_list):
-                action = actions_list[idx]
+            if len(actions_list) != len(env_idx_list):
+                raise ValueError("Actions and environment IDs must have the same length")
+            if len(set(env_idx_list)) != len(env_idx_list):
+                raise ValueError("Batched IK requires unique environment IDs")
+            active_actions = []
+            for action, env_idx in zip(actions_list, env_idx_list):
                 self.validate_action_dict(action)
                 action_type = self.get_action_type(action)
                 if self.take_action_cnt[env_idx] == self.step_lim or self.end_flag[env_idx]:
                     continue
-
+                active_actions.append((env_idx, action, action_type))
+            ee_actions = [(env_idx, action) for env_idx, action, action_type in active_actions
+                          if action_type == "ee"]
+            batch_ik = {}
+            for robot in self.robot_manager.robot_list:
+                if robot.type != "target" or not ee_actions:
+                    continue
+                key = f"{robot.arm_name.split('_')[0]}_ee_pose"
+                solved = self.robot_manager.solve_ik_batch(
+                    [action[key] for _, action in ee_actions],
+                    [env_idx for env_idx, _ in ee_actions], robot,
+                )
+                if len(solved) != len(ee_actions):
+                    raise RuntimeError("Batched IK returned a different number of environments")
+                for (env_idx, _), result in zip(ee_actions, solved):
+                    batch_ik[(env_idx, robot.arm_name)] = result
+            for env_idx, action, action_type in active_actions:
                 self.take_action_cnt[env_idx] += 1
                 print(
                     f"env{env_idx} step: \033[92m{self.take_action_cnt[env_idx]} / {self.step_lim}\033[0m",
@@ -413,15 +433,8 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                     for robot in self.robot_manager.robot_list:
                         if robot.type != "target":
                             continue
-                        name = robot.arm_name.split("_")[0]
-                        key_name = f"{name}_ee_pose"
                         obs_name = self.robot_manager.process_name(robot.arm_name)
-                        target_pose = action[key_name]
-                        ik_result = self.robot_manager.solve_ik(
-                            target_pose=target_pose,
-                            env_idx=env_idx,
-                            robot=robot,
-                        )
+                        ik_result = batch_ik[(env_idx, robot.arm_name)]
                         if ik_result["status"] == "Success":
                             control_info[obs_name] = {
                                 "position": ik_result["joint_value"],
