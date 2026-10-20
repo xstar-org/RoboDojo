@@ -149,10 +149,9 @@ are unchanged. Initialization speedup must be measured separately.
 探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
 启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。
 
-
 ### Optional CPU physics USD writeback deferral
 
-`ROBODOJO_DEFER_USD_WRITEBACK=1` keeps every interpolated control and physical
+Set `defer_usd_writeback: true` in `env_cfg/sim/sim_config.yml` to enable this option (default: `false`). It keeps every interpolated control and physical
 step, but defers intermediate CPU physics transform output to USD until the
 last control group. USD output is restored before reward, interaction checks
 and observation. Native physics tensor reads used by control and safety remain
@@ -164,3 +163,13 @@ original setting and step dispatch are restored; existing evaluation recovery
 resets the failed scene. The option does not change cameras, solver parameters,
 model inputs, dtype or physics step count. `env.usd_writeback_stats` records
 control groups that deferred or published transforms when the option is used.
+### Camera resource lifetime
+
+Camera resets explicitly detach old annotators and destroy their owned render
+products before creating replacements. Closing the capture manager uses the
+same idempotent release path. Camera resolution, projection, frame delivery,
+physics and policy settings are preserved.
+
+### Optional batched inverse kinematics
+
+Multi-environment end-effector control automatically solves each target arm across the active environments as one IK batch. No environment-variable switch is needed. The single-environment entry retains scalar IK. Each arm keeps its own environment mapping even when two arms share a robot model name. Finished environments are excluded and smaller batches reuse the allocated solver capacity with padded results discarded. Solver seed counts, collision checks, tolerances, control interpolation and physics remain unchanged. This option does not change policy-server batching.

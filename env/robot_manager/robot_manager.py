@@ -337,6 +337,20 @@ class RobotManager:
         robot_pose = deepcopy(robot.entity_origin_pose)
         return planner.solve_ik_to_joint(now_qpos, trans_target_pose, real_robot_pose=robot_pose)
 
+    def solve_ik_batch(self, target_poses, env_indices, robot):
+        """Solve targets in environment order, retaining scalar IK for a single-env scene."""
+        if not env_indices:
+            return []
+        if self.num_envs == 1:
+            return [
+                self.solve_ik(target_pose=pose, env_idx=env_idx, robot=robot)
+                for pose, env_idx in zip(target_poses, env_indices)
+            ]
+        states = self.get_joint(robot, env_idx_list=env_indices)
+        return self.ik_solver[robot.robot_name].solve_ik_batch_to_joint(
+            [states[i] for i in env_indices], target_poses, deepcopy(robot.entity_origin_pose)
+        )
+
     def process_name(self, name):
         if name.endswith("_state"):
             return name
