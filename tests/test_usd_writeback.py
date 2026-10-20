@@ -47,6 +47,7 @@ class World(Task):
             sim=SimpleNamespace(device="cpu"),
             event_manager=SimpleNamespace(available_modes=[]),
         )
+        self.sim_config = {"defer_usd_writeback": True}
         self.use_fabric = False
         self.robot_manager = SimpleNamespace(
             control_manager=SimpleNamespace(control_queue=self.queues)
@@ -87,10 +88,7 @@ class WritebackTests(unittest.TestCase):
             "env.environment.task_env": task,
         })
         self.modules.start()
-        self.flag = patch.dict("os.environ", ROBODOJO_DEFER_USD_WRITEBACK="1")
-        self.flag.start()
         self.addCleanup(self.modules.stop)
-        self.addCleanup(self.flag.stop)
 
     def test_retains_all_steps_and_publishes_before_consumers(self):
         self.world.run()
@@ -100,11 +98,17 @@ class WritebackTests(unittest.TestCase):
         self.assertNotIn("sim_step", vars(self.world))
 
     def test_default_has_original_behavior_and_no_instance_hooks(self):
-        with patch.dict("os.environ", ROBODOJO_DEFER_USD_WRITEBACK="0"):
-            self.world.run()
+        self.world.sim_config = {}
+        self.world.run()
         self.assertEqual(self.world.flags, [True] * 10)
         self.assertFalse(hasattr(self.world, "usd_writeback_stats"))
         self.assertNotIn("sim_step", vars(self.world))
+
+    def test_explicit_false_keeps_original_behavior(self):
+        self.world.sim_config["defer_usd_writeback"] = False
+        self.world.run()
+        self.assertEqual(self.world.flags, [True] * 10)
+        self.assertFalse(hasattr(self.world, "usd_writeback_stats"))
 
     def test_partial_ids_do_not_clear_inactive_queues(self):
         self.world.queues[1].count = 7

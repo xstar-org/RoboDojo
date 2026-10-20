@@ -1,6 +1,5 @@
 """Publish CPU physics transforms before consumers, retaining every physics step."""
 from contextlib import contextmanager
-import os
 
 
 USD_WRITEBACK = "/physics/updateToUsd"
@@ -13,7 +12,7 @@ def deferred_usd_writeback(env, env_ids):
     Control/safety reads use native physics tensors. Tasks with custom per-step
     behavior or interval events retain their original writeback behavior.
     """
-    if os.environ.get("ROBODOJO_DEFER_USD_WRITEBACK", "0") != "1":
+    if not env.sim_config.get("defer_usd_writeback", False):
         yield
         return
 
