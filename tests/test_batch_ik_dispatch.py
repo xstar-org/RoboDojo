@@ -60,6 +60,20 @@ class Dispatch(unittest.TestCase):
         e,a,c,o=fixture()
         with self.assertRaises(ValueError):run(e,a[:2],[1,1])
         self.assertEqual(c,[])
+    def test_action_validation_and_type_inference_once(self):
+        e,a,c,o=fixture()
+        validations=[];inferences=[]
+        infer=e.get_action_type
+        e.validate_action_dict=lambda action:validations.append(id(action))
+        e.get_action_type=lambda action:(inferences.append(id(action)) or infer(action))
+        run(e,a)
+        self.assertEqual(validations,[id(action) for action in a])
+        self.assertEqual(inferences,validations)
+    def test_action_count_mismatch_fails(self):
+        e,a,c,o=fixture()
+        with self.assertRaises(ValueError):run(e,a[:2])
+        self.assertEqual(c,[])
+        self.assertEqual(e.take_action_cnt,[0]*3)
     def test_joint_action_does_not_call_ik(self):
         e,a,c,o=fixture()
         for i,row in enumerate(a):row.update(left_arm_joint_state=[i]*6,right_arm_joint_state=[100+i]*6)
