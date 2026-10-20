@@ -1,13 +1,16 @@
 import ast,os,unittest
 from copy import deepcopy
 from pathlib import Path
-from types import SimpleNamespace as NS
+from types import SimpleNamespace as NS, MethodType
 import numpy as np
 R=Path(os.environ.get('CODEX_IK_REPO',str(Path(__file__).resolve().parents[1])))
 node=next(n for n in ast.walk(ast.parse((R/'src/eval_client/eval_env.py').read_text(encoding='utf-8')))if isinstance(n,ast.FunctionDef)and n.name=='take_action_batch')
 ns=dict(os=os,np=np,deepcopy=deepcopy)
 exec(compile(ast.Module(body=[node],type_ignores=[]),'actual_frozen_take_action_batch','exec'),ns)
 run=ns['take_action_batch']
+manager_node=next(n for n in ast.walk(ast.parse((R/'env/robot_manager/robot_manager.py').read_text(encoding='utf-8')))if isinstance(n,ast.FunctionDef)and n.name=='solve_ik_batch')
+exec(compile(ast.Module(body=[manager_node],type_ignores=[]),'actual_solve_ik_batch','exec'),ns)
+manager_batch=ns['solve_ik_batch']
 def fixture(n=3):
     calls=[];controls={}
     robots=[NS(type='target',robot_name='x5',arm_name=side+'_arm',gripper_name=side+'_ee',ee_type='gripper',gripper_move=dict(sign=1,mimic=[0,1,0]),gripper_scale=[0,1])for side in ('left','right')]
@@ -17,6 +20,9 @@ def fixture(n=3):
         calls.append(('scalar',robot.arm_name,env_idx));return dict(status='Success',joint_value=np.full(6,target_pose[0]))
     def process(info,i):controls[i]=info;return[info]
     manager=NS(robot_list=robots,solve_ik_batch=solve,solve_ik=scalar,process_name=lambda name:name+'_joint_state',control_manager=NS(push=lambda*a:None))
+    if n == 1:
+        manager.num_envs=n
+        manager.solve_ik_batch=MethodType(manager_batch,manager)
     env=NS(physx_monitor_enabled=False,num_envs=n,robot_manager=manager,take_action_cnt=[0]*n,step_lim=800,end_flag=[False]*n,validate_action_dict=lambda a:None,get_action_type=lambda a:'joint'if'left_arm_joint_state'in a else'ee',process_control_info=process,have_empty=lambda ids:True,reward_manager=NS(step=lambda**kw:None),is_episode_end=lambda:None)
     actions=[dict(left_ee_pose=[i+1]*7,right_ee_pose=[i+101]*7,left_ee_joint_state=[.5],right_ee_joint_state=[.5])for i in range(n)]
     return env,actions,calls,controls
