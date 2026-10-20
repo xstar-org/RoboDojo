@@ -2,7 +2,6 @@ import ast,os,unittest
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace as NS
-from unittest.mock import patch
 import numpy as np
 R=Path(os.environ.get('CODEX_IK_REPO',str(Path(__file__).resolve().parents[1])))
 node=next(n for n in ast.walk(ast.parse((R/'src/eval_client/eval_env.py').read_text(encoding='utf-8')))if isinstance(n,ast.FunctionDef)and n.name=='take_action_batch')
@@ -24,7 +23,7 @@ def fixture(n=3):
 class Dispatch(unittest.TestCase):
     def test_dual_arms_same_robot_name_and_32_envs(self):
         e,a,c,o=fixture(32)
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,a)
+        run(e,a)
         self.assertEqual(c,[('left_arm',list(range(32))),('right_arm',list(range(32)))])
         for i in range(32):
             np.testing.assert_array_equal(o[i]['left_arm_joint_state']['position'],np.full(6,i+1))
@@ -32,36 +31,32 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(e.take_action_cnt,[1]*32)
     def test_permuted_environment_ids(self):
         e,a,c,o=fixture()
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,[a[2],a[0]],[2,0])
+        run(e,[a[2],a[0]],[2,0])
         self.assertEqual(c,[('left_arm',[2,0]),('right_arm',[2,0])]);self.assertEqual(e.take_action_cnt,[1,0,1])
         self.assertEqual(o[2]['left_arm_joint_state']['position'][0],3)
     def test_finished_and_limit_envs_skip(self):
         e,a,c,o=fixture();e.end_flag[1]=True;e.take_action_cnt[2]=800
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,a)
+        run(e,a)
         self.assertEqual(c,[('left_arm',[0]),('right_arm',[0])]);self.assertEqual(set(o),{0})
     def test_tail_one_and_empty(self):
         e,a,c,o=fixture()
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,[a[1]],[1]);run(e,[],[])
+        run(e,[a[1]],[1]);run(e,[],[])
         self.assertEqual(c,[('left_arm',[1]),('right_arm',[1])]);self.assertEqual(set(o),{1})
-    def test_flag_off_retains_scalar(self):
-        e,a,c,o=fixture()
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='0'):run(e,a)
-        self.assertEqual(len(c),6);self.assertTrue(all(r[0]=='scalar'for r in c))
     def test_single_env_retains_scalar(self):
         e,a,c,o=fixture(1)
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,a)
+        run(e,a)
         self.assertTrue(all(r[0]=='scalar'for r in c))
     def test_invalid_result_length_fails_before_counter_change(self):
         e,a,c,o=fixture();e.robot_manager.solve_ik_batch=lambda*a:[]
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'),self.assertRaises(RuntimeError):run(e,a)
+        with self.assertRaises(RuntimeError):run(e,a)
         self.assertEqual(e.take_action_cnt,[0]*3)
     def test_duplicate_ids_fail(self):
         e,a,c,o=fixture()
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'),self.assertRaises(ValueError):run(e,a[:2],[1,1])
+        with self.assertRaises(ValueError):run(e,a[:2],[1,1])
         self.assertEqual(c,[])
     def test_joint_action_does_not_call_ik(self):
         e,a,c,o=fixture()
         for i,row in enumerate(a):row.update(left_arm_joint_state=[i]*6,right_arm_joint_state=[100+i]*6)
-        with patch.dict(os.environ,ROBODOJO_BATCH_IK='1'):run(e,a)
+        run(e,a)
         self.assertEqual(c,[]);self.assertEqual(e.take_action_cnt,[1]*3)
 if __name__=='__main__':unittest.main(verbosity=2)
