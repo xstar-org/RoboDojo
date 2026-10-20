@@ -166,3 +166,8 @@ are unchanged. Initialization speedup must be measured separately.
 后续 episode 复用连接。内置 XPolicyLab 先加载模型、后监听，无需 ready 文件、额外端口
 探测、入口包装或代理。启动器保留客户端退出码；服务提前退出则终止等待中的客户端并报错。
 启动器需要 Bash5.1 及以上。此改动不改变观测、物理、动作或模型参数，初始化收益另行实测。
+
+
+### Optional batched inverse kinematics
+
+Multi-environment end-effector control automatically solves each target arm across the active environments as one IK batch. No environment-variable switch is needed. The single-environment entry retains scalar IK. Each arm keeps its own environment mapping even when two arms share a robot model name. Finished environments are excluded and smaller batches reuse the allocated solver capacity with padded results discarded. Solver seed counts, collision checks, tolerances, control interpolation and physics remain unchanged. This option does not change policy-server batching.
