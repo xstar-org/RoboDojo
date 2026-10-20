@@ -106,6 +106,8 @@ class CuroboPlanner:
 
     def __del__(self):
         try:
+            if hasattr(self, "_ik_batch_solver"):
+                self._ik_batch_solver.destroy()
             if hasattr(self, "ik_solver"):
                 self.ik_solver.destroy()
             if hasattr(self, "motion_planner"):
@@ -407,6 +409,54 @@ class CuroboPlanner:
             "joint_value": joint_solution,
         }
 
+    def solve_ik_batch_to_joint(self, curr_joint_positions, target_ee_poses, real_robot_pose):
+        """Solve one arm's independent environment goals with one GPU submission."""
+        count = len(target_ee_poses)
+        if count == 0:
+            return []
+        if len(curr_joint_positions) != count:
+            raise ValueError("IK state/goal batch sizes differ")
+        if not hasattr(self, "_ik_batch_solver") or count > self._ik_batch_capacity:
+            if hasattr(self, "_ik_batch_solver"):
+                self._ik_batch_solver.destroy()
+            self._ik_batch_capacity = count
+            self._ik_batch_solver = InverseKinematics(self._build_ik_cfg(count))
+        rows = []
+        base_pose = np.asarray(self.robot_origin_pose, dtype=np.float32)
+        for joints, target in zip(curr_joint_positions, target_ee_poses):
+            target = calculate_target_pose(real_robot_pose, self.robot_origin_pose, deepcopy(target))
+            pos, quat = self._trans_from_world_to_base(base_pose, np.asarray(target, dtype=np.float32))
+            pos = pos + np.asarray(self.frame_bias)
+            rows.append(np.concatenate((pos, quat, self._build_cspace_joint_values(joints))))
+        # One host/device boundary for all poses and joint states of this arm.
+        # cuRobo caches full JointState buffers, including derivatives. Keep the
+        # solver batch fixed when environments finish, and discard padded results.
+        padded_rows = rows + [rows[-1]] * (self._ik_batch_capacity - count)
+        packed = torch.as_tensor(np.asarray(padded_rows, dtype=np.float32), device=self.device_cfg.device)
+        goals = GoalToolPose.from_poses(
+            {self.ee_link: Pose(position=packed[:, :3].contiguous(), quaternion=packed[:, 3:7].contiguous())},
+            ordered_tool_frames=self.tool_frames, num_goalset=1,
+        )
+        current = JointState.from_position(packed[:, 7:].contiguous(), joint_names=self.cspace_joint_names)
+        result = self._ik_batch_solver.solve_pose(goal_tool_poses=goals, current_state=current, return_seeds=1)
+        if result.success is None or result.js_solution is None or result.js_solution.position is None:
+            return [{"status": "Fail", "joint_names": self.active_joints_name} for _ in rows]
+        solution = result.js_solution.position
+        solution = solution.reshape(solution.shape[0], -1, solution.shape[-1])[:, 0]
+        names = list(getattr(result.js_solution, "joint_names", None) or [])
+        if len(names) == solution.shape[-1]:
+            indices = [names.index(name) for name in self.active_joints_name]
+        elif solution.shape[-1] == len(self.cspace_joint_names):
+            indices = self._active_to_cspace_idx
+        elif solution.shape[-1] == len(self.active_joints_name):
+            indices = list(range(len(self.active_joints_name)))
+        else:
+            raise ValueError("Unexpected batched IK joint solution dimension")
+        success = result.success.reshape(result.success.shape[0], -1)[:, :1]
+        host = torch.cat((success.to(solution.dtype), solution[:, indices]), dim=1).detach().cpu().numpy()
+        return [dict(status="Success" if row[0] else "Fail", joint_names=self.active_joints_name,
+                     joint_value=row[1:]) for row in host[:count]]
+
     def _trans_from_world_to_base(self, base_pose, target_pose):
         """
         transform target pose from world frame to base frame
@@ -522,7 +572,7 @@ class CuroboPlanner:
             cfg.graph_planner_config = None
         return cfg
 
-    def _build_ik_cfg(self):
+    def _build_ik_cfg(self, max_batch_size=1):
         return InverseKinematicsCfg.create(
             robot=self.robot_cfg,
             scene_model=self.scene_model,
@@ -533,7 +583,7 @@ class CuroboPlanner:
             orientation_tolerance=0.02,
             self_collision_check=True,
             use_cuda_graph=self.use_cuda_graph,
-            max_batch_size=1,
+            max_batch_size=max_batch_size,
             multi_env=False,
             max_goalset=1,
         )

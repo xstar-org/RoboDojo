@@ -155,3 +155,7 @@ Camera resets explicitly detach old annotators and destroy their owned render
 products before creating replacements. Closing the capture manager uses the
 same idempotent release path. Camera resolution, projection, frame delivery,
 physics and policy settings are preserved.
+
+### Optional batched inverse kinematics
+
+Multi-environment end-effector control automatically solves each target arm across the active environments as one IK batch. No environment-variable switch is needed. The single-environment entry retains scalar IK. Each arm keeps its own environment mapping even when two arms share a robot model name. Finished environments are excluded and smaller batches reuse the allocated solver capacity with padded results discarded. Solver seed counts, collision checks, tolerances, control interpolation and physics remain unchanged. This option does not change policy-server batching.
