@@ -290,6 +290,25 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 data_list.append(env_data)
             return data_list
 
+        def stream_video_batch(self, env_idx_list=None):
+            """Capture camera frames and record them to the eval videos only.
+
+            Same per-step frame cadence as get_obs_batch (one frame per action
+            step, matching the declared observation frequency), but skips the
+            per-env observation assembly, deep copies and return payload.
+            Policies that replan on full chunks use this to keep official video
+            density while only uploading chunk-boundary observations.
+            """
+            if self.physx_monitor_enabled:
+                self._check_physx_broken_envs()
+            if env_idx_list is None:
+                env_idx_list = list(range(self.num_envs))
+            self.obs_manager.render_for_capture()
+            data = self.obs_manager.get_obs(env_idx_list=env_idx_list)
+            for env_idx in env_idx_list:
+                if not self.end_flag[env_idx]:
+                    self._stream_vision(env_idx, data[env_idx])
+
         def eval_one_episode(self):
             policy_name = self.deploy_cfg["policy_name"]
             try:
