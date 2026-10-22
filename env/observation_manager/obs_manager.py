@@ -3,6 +3,8 @@ from typing import List
 
 import numpy as np
 
+from utils.camera_observation import capture_valid_observation
+
 from env.description_manager.desc_manager import DescManager
 
 
@@ -40,6 +42,8 @@ class ObsManager:
         # the entrypoints enable; render_sync adds one more if they are absent.
         self.capture_render_passes = int(self.obs_config.get("capture_render_passes", 1))
         self.capture_render_max_passes = int(self.obs_config.get("capture_render_max_passes", 16))
+        # Set reject_black_frames=false only for deliberately blank cameras.
+        self.reject_black_frames = bool(self.obs_config.get("reject_black_frames", True))
         if self.collect_freq > 0:
             self.collect_interval = 1.0 / (self.dt * self.collect_freq)
         else:
@@ -95,6 +99,13 @@ class ObsManager:
         )
 
     def get_obs(self, env_idx_list=None):  # batch
+        if not self.reject_black_frames or self.capture_manager is None:
+            return self._get_obs_unchecked(env_idx_list)
+        return capture_valid_observation(
+            lambda: self._get_obs_unchecked(env_idx_list), self.env.render
+        )
+
+    def _get_obs_unchecked(self, env_idx_list=None):
         if env_idx_list is None:
             env_idx_list = range(self.num_envs)
         obs = dict()

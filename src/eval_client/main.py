@@ -143,6 +143,9 @@ from env.global_configs import *
 from src.eval_client.eval_env import create_eval_env
 from utils.cluttered_generator import UnStableError
 from utils.load_file import load_yaml
+from utils.camera_observation import InvalidCameraObservationError
+from utils.eval_lifecycle import bounded_cleanup, run_evaluation
+from utils.save_file import abort_active_video_streams
 from utils.pipeline_utils import *
 
 BENCHMARK_PATH = os.path.join(ROOT_DIR, "task", BENCHMARK)
@@ -383,9 +386,9 @@ def main():
 
         except UnStableError:
             env.seed_manager.eval_step()
-        except ConnectionError:
+        except (ConnectionError, InvalidCameraObservationError):
             # An unavailable policy is not an unstable layout. Preserve the
-            # connection failure instead of silently skipping this episode.
+            # infrastructure failure instead of silently skipping this episode.
             raise
         except Exception as e:
             import traceback
@@ -455,11 +458,12 @@ def main():
 
         env.close()
 
+    with bounded_cleanup():
+        _close_model_client(env)
+        env.close()
+        simulation_app.close()
     _delete_resume_manifest(env)
-    _close_model_client(env)
-    env.close()
-    simulation_app.close()
 
 
 if __name__ == "__main__":
-    main()
+    run_evaluation(main, abort_active_video_streams)

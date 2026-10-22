@@ -3,8 +3,17 @@ import os
 from pathlib import Path
 import subprocess
 from typing import Any
+import weakref
 
 import numpy as np
+
+_active_video_writers = weakref.WeakSet()
+
+
+def abort_active_video_streams():
+    """Release this client's encoders before bypassing simulator atexit hooks."""
+    for writer in list(_active_video_writers):
+        writer.abort()
 
 
 def format_video_saved_message(
@@ -82,6 +91,7 @@ class VideoStreamWriter:
             ],
             stdin=subprocess.PIPE,
         )
+        _active_video_writers.add(self)
 
     def append(self, frame: np.ndarray) -> None:
         if self.proc is None:
@@ -103,6 +113,7 @@ class VideoStreamWriter:
                 raise OSError(f"ffmpeg failed while finalizing `{self.out_path}`.")
         finally:
             self.proc = None
+            _active_video_writers.discard(self)
         if announce:
             print(
                 format_video_saved_message(
@@ -117,17 +128,20 @@ class VideoStreamWriter:
     def abort(self) -> None:
         """Kill the ffmpeg process and remove the partial output file."""
         if self.proc is not None:
+            # Kill before closing stdin: closing a buffered pipe can otherwise
+            # block flushing into an encoder that has stopped reading.
+            try:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             try:
                 if self.proc.stdin is not None:
                     self.proc.stdin.close()
             except Exception:
                 pass
-            try:
-                self.proc.kill()
-                self.proc.wait()
-            except Exception:
-                pass
             self.proc = None
+        _active_video_writers.discard(self)
         try:
             if os.path.exists(self.out_path):
                 os.remove(self.out_path)
