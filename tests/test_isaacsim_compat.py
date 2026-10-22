@@ -1,11 +1,12 @@
 """Compatibility boundaries can be checked without initializing the SDK/GPU."""
+import ast
 import importlib.metadata
 from pathlib import Path
 import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from utils import isaacsim_compat as compat
 
@@ -23,14 +24,26 @@ useFastCache = false
 
 
 class RuntimeTests(unittest.TestCase):
-    def test_sim5_does_not_change_imports_or_experience(self):
-        args = SimpleNamespace(experience="")
-        before = list(sys.meta_path)
-        with patch.object(compat.importlib.metadata, "version", return_value="5.1.0.0"):
-            compat.install_sim6_compatibility()
-            compat.configure_sim6_app(args)
-        self.assertEqual(before, sys.meta_path)
-        self.assertEqual(args.experience, "")
+    def test_main_selects_both_sim6_operations_without_loading_the_sdk(self):
+        main = Path(__file__).resolve().parents[1] / "src/eval_client/main.py"
+        tree = ast.parse(main.read_text(encoding="utf-8"))
+        selection = [node for node in tree.body if
+                     isinstance(node, ast.Assign) and any(
+                         isinstance(t, ast.Name) and t.id == "IS_SIM6" for t in node.targets)
+                     or isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                     and node.test.id == "IS_SIM6"]
+        self.assertEqual(len(selection), 3)
+        for sim6 in (False, True):
+            detect, install, configure = Mock(return_value=sim6), Mock(), Mock()
+            args = SimpleNamespace(experience="")
+            namespace = dict(is_sim6=detect, install_sim6_compatibility=install,
+                             configure_sim6_app=configure, args_cli=args)
+            exec(compile(ast.Module(body=selection, type_ignores=[]), str(main), "exec"), namespace)
+            detect.assert_called_once_with()
+            self.assertEqual(install.call_count, int(sim6))
+            self.assertEqual(configure.call_count, int(sim6))
+            if sim6:
+                configure.assert_called_once_with(args)
 
     def test_sim6_alias_finder_is_idempotent_and_narrow(self):
         with patch.object(compat.importlib.metadata, "version", return_value="6.0.0.1"), \

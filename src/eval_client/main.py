@@ -5,9 +5,11 @@ import json
 import os
 import sys
 
-from utils.isaacsim_compat import configure_sim6_app, install_sim6_compatibility
+from utils.isaacsim_compat import configure_sim6_app, install_sim6_compatibility, is_sim6
 
-install_sim6_compatibility()
+IS_SIM6 = is_sim6()
+if IS_SIM6:
+    install_sim6_compatibility()
 
 from isaaclab.app import AppLauncher
 
@@ -128,7 +130,8 @@ if enable_monitor:
 from env.camera_manager.capture.render_sync import add_zero_delay_kit_args
 
 add_zero_delay_kit_args(args_cli)
-configure_sim6_app(args_cli)
+if IS_SIM6:
+    configure_sim6_app(args_cli)
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)

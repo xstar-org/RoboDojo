@@ -77,8 +77,8 @@ class _TensorAliasFinder(importlib.abc.MetaPathFinder):
 
 
 def install_sim6_compatibility():
-    """Install only the old import names used by the pinned Lab's rigid path."""
-    if is_sim6() and not any(isinstance(finder, _TensorAliasFinder) for finder in sys.meta_path):
+    """Register old import names for Sim6; the caller selects the runtime."""
+    if not any(isinstance(finder, _TensorAliasFinder) for finder in sys.meta_path):
         sys.meta_path.insert(0, _TensorAliasFinder())
 
 
@@ -114,8 +114,8 @@ def _experience_text(template, apps):
 
 
 def configure_sim6_app(args):
-    """Select a portable cached experience unless the caller supplied one."""
-    if not is_sim6() or getattr(args, "experience", ""):
+    """Configure Sim6's experience; the caller selects the runtime."""
+    if getattr(args, "experience", ""):
         return
     apps = _lab_apps_directory()
     text = _experience_text((apps / "isaaclab.python.kit").read_text(encoding="utf-8"), apps)
