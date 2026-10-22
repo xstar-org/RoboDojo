@@ -13,6 +13,7 @@ import torch
 from env.camera_manager.camera_manager import CameraManager
 from env.camera_manager.capture.camera_view import CameraView
 from env.environment.isaac.isaac_rl_env import IsaacRLEnv
+from utils.isaacsim_compat import is_sim6
 
 
 class TiledCaptureManager:
@@ -31,6 +32,9 @@ class TiledCaptureManager:
         self.config = config
         self.camera_manager = camera_manager
         self.num_envs = num_envs
+        # Sim6 retargeting the shared tiled product produces near-white wrist
+        # views. Keep one product per camera type; retain Sim5's proven path.
+        self._separate_products = num_envs > 1 and is_sim6()
         self.device = device
         self.tiled_render_products: List[str] = []  # all the render products
         self.annotator: List[
@@ -122,7 +126,7 @@ class TiledCaptureManager:
 
             camera_resolution = self.cameras[0][cam_id]._resolution
             height, width = camera_resolution[1], camera_resolution[0]
-            if self.num_envs > 1:
+            if self.num_envs > 1 and not self._separate_products:
                 # One tiled product is reused across camera types. Mixing head
                 # and wrist cameras in one tile set changes their projection;
                 # separate simultaneous products can lose materials in Isaac 5.1.
@@ -171,6 +175,16 @@ class TiledCaptureManager:
         if self.num_envs == 1:
             return self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
         from env.camera_manager.capture.render_sync import wait_for_latest_cameras
+
+        if self._separate_products:
+            context = self.sim.sim
+            start_time = context.current_time
+            wait_for_latest_cameras(context, min_passes=2)
+            data = self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
+            if context.current_time != start_time:
+                raise RuntimeError("Physics advanced during camera capture")
+            return data
+
         import omni.usd
         from pxr import Usd
 
@@ -212,7 +226,7 @@ class TiledCaptureManager:
         for cam_id in cam_ids:
             cam_data = {}
             annotator_names = self.annotator_type[cam_id]
-            view_id = 0 if self.num_envs > 1 else cam_id
+            view_id = 0 if self.num_envs > 1 and not self._separate_products else cam_id
             for annotator_name in annotator_names:
                 pre_allocated_out = None
                 if view_id in self._output_buffers and annotator_name in self._output_buffers[view_id]:

@@ -63,6 +63,40 @@ XPolicyLab/            policy server and policy integrations
 Assets/                downloaded robot, object, material, and layout assets
 ```
 
+## Isaac Sim 6.0 rigid-task compatibility
+
+The simulator client also supports the pinned Isaac Lab submodule (`afca7b0`,
+app-template version 2.3.2) with the Isaac Sim `6.0.0.1` Python distribution
+(Python 3.12). The normal evaluation
+entrypoint detects Sim6 and installs the legacy tensor import names before
+loading Lab, then generates a cached Kit experience from Lab's template. The
+experience uses the installed Sim6 content browser and URDF importer 3.11.0,
+disables online extension resolution, and resolves Lab folders from the local
+installation. There are no machine-specific paths or extra compatibility flags.
+An explicitly supplied `--experience` is respected. The installer default is
+unchanged; use a separate Sim6 evaluation environment with compatible PyTorch,
+CUDA and cuRobo builds.
+
+For multi-environment capture, Sim6 uses an independent tiled render product
+for each camera type. Reusing and retargeting the Sim5 product produced
+near-white wrist images even when the head camera remained correct. All camera
+types are read at one physics state after delivered-frame synchronization.
+Independent products consume more GPU memory; worker capacity must be measured
+for the selected env count. Sim5 retains its existing shared-product path.
+
+Custom Python launchers must call `install_sim6_compatibility()` from
+`utils.isaacsim_compat` before importing Isaac Lab, and call
+`configure_sim6_app(args)` before constructing `AppLauncher(args)`. The normal
+`scripts/robodojo.sh` / `src/eval_client/main.py` path does this automatically.
+
+Validation is scoped to rigid `build_tower` evaluation on RTX 4090 D with
+driver 595.99.02, default CPU physics and GPU rendering. Old deformable type
+names are aliases to real Sim6 type/schema objects for Lab's eager rigid-path
+imports; removed soft-body operations are **not** implemented. This is not
+all-task, deformable-task, optional CUDA-physics or policy-accuracy acceptance.
+XPolicyLab and VPP2 require no simulator compatibility changes. Model serving,
+HTTP bridges and cached-action performance tools remain outside this repository.
+
 ## 🔌 Policy Integration
 
 Policies live in [XPolicyLab](https://github.com/XPolicyLab/XPolicyLab/blob/main/README.md), which owns policy structure, dependencies, checkpoint layout, and server behavior. RoboDojo only assumes a policy directory provides:
