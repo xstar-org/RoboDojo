@@ -17,11 +17,6 @@ MAX_INPROC_RESTARTS = 3
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task_name", type=str)
-parser.add_argument(
-    "--env_factory_module",
-    default=None,
-    help="Optional module exposing instrument_factory(factory) for evaluation instrumentation.",
-)
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 parser.add_argument(
     "--env_cfg_type",
@@ -356,11 +351,7 @@ def main():
     env_cfg.sim.seed = [0 for _ in range(num_envs)]
     run_id = os.environ["ROBODOJO_RUN_ID"]
     resume_state = _load_resume_manifest(eval_cfg, run_id)
-    factory = create_eval_env
-    if args_cli.env_factory_module:
-        module = importlib.import_module(args_cli.env_factory_module)
-        factory = module.instrument_factory(factory)
-    env = factory(env_cfg, simulation_app, resume_state=resume_state)
+    env = create_eval_env(env_cfg, simulation_app, resume_state=resume_state)
     eval_time = env.success_nums + env.fail_nums
     if eval_time >= eval_num:
         # Already complete on resume - nothing left to do.
