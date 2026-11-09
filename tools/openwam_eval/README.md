@@ -1,32 +1,47 @@
-# Native PT16 OpenWAM evaluation
+# OpenWAM evaluation with Isaac Sim 6
 
-This directory contains the runtime used to evaluate real OpenWAM checkpoints
-with multiple isolated RoboDojo workers and resumable native case accounting.
-The XPolicyLab submodule pins the tested `xstar-main` implementation.
+This opt-in runtime runs real OpenWAM checkpoints with one policy GPU and up to
+three simulation GPUs. It preserves native scoring, physics and unstable-case
+exclusions. The validated SDK baseline is **Isaac Sim 6.0.0.1**; this is not a
+claim of validation on 6.1.
 
-The protocol uses three RGB cameras at 640×480, PathTracing with 16 samples per
-pixel and total samples, OptiX denoising, 32 predicted/executed actions, and ten
-denoising iterations. Checkpoint comparisons should use this same protocol.
+The evaluation protocol is three 640×480 RGB cameras, PathTracing at 16 samples
+per pixel and total samples, OptiX denoising, two native camera deliveries,
+32 predicted/executed actions and ten denoising iterations. The XPolicyLab
+submodule pins the tested implementation.
 
-## Optimizations
+## Entry points
 
-`runtime/measure.py` installs two verified optimizations:
+`runtime/instrument_entry.py` runs the standard evaluation client with its
+explicit `--env_factory_module client_runtime` hook. It does not rewrite or
+execute a modified copy of the client's source. `client_runtime.py` selects the
+worker's layouts on its own seed manager, records actual counters and input
+identities, installs the optimizations and checks image/physics invariants.
 
-* `counter_delivery.py` keeps the native two-delivery camera fence while bounding
-  path-tracing accumulation to the current observation. It restores renderer
-  settings and verifies that rendering does not advance physics.
-* `gripper_snapshot.py` reuses native gripper readings within a control epoch,
-  invalidates on every physics call, and checks cached values against native
-  getters during the first 64 epochs. Callers retain independent array copies.
+The two simulation optimizations are intentionally isolated:
 
-The runtime enables deferred USD writeback, cached tic-tac-toe geometry, and
-skipping unused warmup observations. Scene setup still executes the native
-physics sequence. `capture_eval_warmup_observations` defaults to true in the
-environment, so the opt-in runtime controls this change.
+- `counter_delivery.py` bounds accumulation to the current observation, retains
+  two native camera deliveries, restores renderer settings even on error and
+  verifies that capture does not advance physics.
+- `gripper_snapshot.py` reuses native gripper readings within a control epoch,
+  invalidates on every physics call and control-step exit, and compares cache
+  hits with native getters during the first 64 epochs. Returned arrays are copies.
 
-## Runtime layout
+Deferred USD writeback, cached tic-tac-toe geometry and skipping discarded
+warmup observations are enabled only by this runtime. Native scene setup and
+control execution are retained. First-frame RGB checks, setup physics counts,
+model batch shapes and 32-action chunks are recorded alongside results.
 
-The controller consumes an explicit run directory:
+`runtime/server_entry.py` isolates each worker's OpenWAM history while sharing
+the model. `profile_policy.py` records real model timings and tensor shapes;
+there is no fixed-worker startup barrier. `policy_compat.py` contains the pinned
+OpenWAM dependency's prompt-cache eviction fix. It cannot simply be deleted:
+the dependency's getter changes LRU order during eviction. Remove this adapter
+when that fix is available in the pinned dependency.
+
+## Run directory
+
+Stage the files in the allocated job as follows:
 
 ```text
 run/
@@ -34,91 +49,70 @@ run/
   serial-multigpu-config.json
   task-plans.json
   parallel-cache-template.json
-  RESUME_AUTHORIZATION.json
   <model>/
     fullsuite_controller.py
     balanced_model_plan.py
     multigpu_plan.py
     native_accounting.py
-    process_identity.py
     manifest.json
     deploy.yaml
     foundation-deploy/
     group0/
-      RoboDojo/                  # checkout with assets and SDK dependencies
+      RoboDojo/                  # checkout, assets and SDK dependencies
       sim-python6-parallel      # environment-specific SDK launcher
       <runtime/*.py>
-      tasks/<task>/
-        partial.json
-        native-exclusions.json
-        result.json
+      tasks/<task>/             # native results and resumable case ledger
 ```
 
-Copy the controller modules and `runtime/*.py` into these locations. Launch
-`serial_runner.py` inside the allocated job. The SDK launcher must activate the
-Isaac Sim environment, select the physical render GPU and logical CUDA device,
-and invoke `group0/instrument_entry.py` for the client entry point. Policy
-inference uses the separate Python environment specified by the manifest.
+The SDK launcher selects the physical rendering GPU and logical CUDA device,
+activates Isaac Sim and invokes `instrument_entry.py`. The manifest supplies
+`job` (string), `cpus`, `policy_cpus`, `sim_cpu_pools`, `policy_gpu`, `sim_gpus`,
+`workers_per_gpu`, `max_envs_per_worker` (1–25), `port`, `policy_python`,
+`checkpoint_label`, `checkpoint_step`, `filesystem_preflight_passed` and
+`task_plans_sha256`. `foundation-deploy` contains the checkpoint, configuration,
+normalization statistics and tokenizer. CPU pools must exclude policy CPUs.
+GPU roles are explicit; no GPU number or physical topology is assumed.
 
-`serial-multigpu-config.json` supplies `job`, `run_tag`, `model_order`, and
-`held_tasks`. `task-plans.json` freezes each task's `seeds`, with a `seed` and
-`layout_ids` list for each partition. `parallel-cache-template.json` supplies
-`entries` as `[source_directory, destination_pattern]` pairs; patterns accept
-`gpu` and `suffix` for private worker caches.
+`task-plans.json` maps task names to `seeds`, each with `seed` and `layout_ids`.
+Task and case totals are derived from this frozen plan. The configuration supplies
+`job`, `run_tag`, `model_order` and optional `held_tasks`, `priority_tasks`,
+`task_batch_sizes` and `complete_first_task`. For example, a batch limit of six
+partitions a 50-case seed into five six-case and four five-case workers;
+`complete_first_task: play_tic_tac_toe` defers other tasks until those cases finish.
+`parallel-cache-template.json` supplies `entries` as source/destination pairs;
+destination patterns accept `gpu` and `suffix` for private worker caches.
 
-Each manifest supplies the allocated `cpus`, `policy_cpus`, `sim_cpu_pools`,
-`policy_gpu`, `sim_gpus`, `workers_per_gpu` (three), `port`, `policy_python`,
-`checkpoint_label`, `checkpoint_step`, `filesystem_preflight_passed`, the frozen
-`task_plans_sha256`, and `resume_gate`/`resume_gate_sha256`. A model's
-`foundation-deploy` directory provides the actual checkpoint, configuration,
-normalization statistics and tokenizer expected by OpenWAM.
+Run `serial_runner.py` inside the allocation. No experiment-specific approval,
+performance-audit or 100 env-step/s gate file is required.
 
-The explicit resume record contains `full_resume_allowed`, `resume_below100`,
-`authorization_kind` (`explicit_user_full_evaluation_priority`), and
-`performance_audit`. The referenced audit must establish
-`mechanical_and_quality_passed`. This records the operator's choice to continue
-evaluation below the 100 env-step/s tuning target; it does not report that the
-target was achieved.
+## Resume and failures
 
-## Scheduling and preservation
-
-`balanced_model_plan.py` partitions each seed into batches of at most 25 cases
-and schedules the pending seed/layout keys across the manifest's simulation
-GPUs. Existing valid and native-excluded keys are retained. Native outcomes keep
-their source result path and index. Model execution is serial; the runner waits
-for the previous model's processes to release their compute contexts.
-
-The controller checks PID start time and cgroup before terminating owned
-processes. An out-of-memory attempt reduces the batch size. A native GPU failure
-stops new dispatch on that GPU and preserves collected rows. SDK-incompatible
-tasks can remain explicitly pending in `held_tasks`; infrastructure errors are
-recorded separately from policy outcomes.
-
-The manifest, task plan, checkpoint identity, renderer settings and input hashes
-should be retained alongside the native results. GPU roles come from the
-manifest, allowing CUDA-only policy inference on a device whose rendering is
-unavailable while healthy devices run simulation.
+Only pending seed/layout keys are scheduled. Completed rows and native exclusions
+retain result paths and indices across restarts. An incomplete reply stays pending;
+it does not become a policy failure. Known SDK-incompatible tasks can be listed in
+`held_tasks`. An out-of-memory attempt reduces batch size; a native GPU failure
+stops dispatch on that GPU. Termination checks PID start time and cgroup before
+signalling owned processes. Checkpoints run serially after previous processes exit.
+Resume uses saved native case ledgers; live-process adoption is not supported.
 
 ## Validation
 
-Measured with a real HDF60000 checkpoint, 128 allocated logical CPUs, a 1200 GiB
-memory allocation, one H100 for policy inference and two H100s for simulation:
+CPU regression checks (NumPy required):
 
-| Workers per simulation GPU | Real envs per worker | 300 s env-step/s | Action-drained env-step/s | Native RGB comparisons |
-|---|---:|---:|---:|---:|
-| 3 | 25 | 67.58 | 71.04 | 450 |
-| 2 | 32 | 61.33 | 63.26 | 384 |
+```bash
+python -m unittest discover -s tools/openwam_eval/tests -v
+```
 
-Both rates include the first real model inference. These are bounded
-`build_tower` performance probes; full-suite rates also include task startup and
-turnover. The first configuration completed 24,800 actual env steps over 349.10
-seconds; the second completed 22,528 over 356.13 seconds. A fourth allocated
-GPU was unused in these probes.
+They cover restart-safe client hook loading, camera-fence restoration on errors,
+exact case partition/resume, partial metric writes and resets, native
+exclusions, per-environment layout filtering, gripper cache invalidation/copy
+ownership, prompt-cache LRU eviction and policy-history isolation between workers.
 
-Independent checks compared every camera against the native two-delivery
-reference with frozen physics and an actual camera pose change. They verified
-unchanged physics clocks, native physical-step and batch-IK counts, gripper
-shadow equality, actual model batch shapes and 32-action chunks. A continuation
-partition check retained 1,239 valid cases and 11 native exclusions and assigned
-1,200 additional runnable keys without duplicates. This preserves the existing
-HDF tic-tac-toe result of 28/50 successes and score 81.50.
+The simulation mechanisms were previously checked against native frozen-physics
+RGB references and actual camera pose changes on SDK 6.0.0.1. A real HDF60000
+`build_tower` probe with two simulation H100s, three workers × 25 environments
+per GPU and one policy H100 measured 67.58 env-step/s over 300 seconds and
+71.04 including action drain and initial inference; 450 RGB comparisons passed.
+These are historical single-task measurements, not full-suite throughput or a
+new native validation of this refactor. Existing allocated evaluations continue
+using their staged code; this PR update does not modify those running copies.

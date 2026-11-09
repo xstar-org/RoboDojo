@@ -1,18 +1,17 @@
-"""Apply observation instrumentation and native-outcome recording to the client."""
-import pathlib,os,sys
-C=pathlib.Path(__file__).resolve().parent
-sys.path.insert(0,str(C))
+"""Launch the standard client using its explicit environment-factory hook."""
 
-p=C/'RoboDojo/src/eval_client/main.py'
-source=p.read_text()
-needle='from src.eval_client.eval_env import create_eval_env'
-assert source.count(needle)==1
-addition='\nfrom measure import instrument_factory\ncreate_eval_env = instrument_factory(create_eval_env)'
+import os
+from pathlib import Path
+import runpy
+import sys
 
-source=source.replace(needle,needle+addition)
-scope={'__name__':'__main__','__file__':str(p),'__package__':None}
-try:
-    exec(compile(source,str(p),'exec'),scope)
-except BaseException:
-    import traceback
-    traceback.print_exc();sys.stdout.flush();sys.stderr.flush();os._exit(1)
+runtime = Path(__file__).resolve().parent
+sys.path.insert(0, str(runtime))
+# Native PhysX recovery re-execs main.py; keep its explicit hook importable.
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [str(runtime)] + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])
+)
+entry = runtime / "RoboDojo/src/eval_client/main.py"
+sys.argv[0] = str(entry)
+sys.argv.extend(["--env_factory_module", "client_runtime"])
+runpy.run_path(str(entry), run_name="__main__")
