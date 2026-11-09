@@ -1,9 +1,6 @@
 decimation: 1
 dt: 0.004
 render_interval: 10
-# Preserve native warmup captures by default. Disabling only skips observations
-# discarded during evaluation setup; stability checks and physics steps remain.
-capture_eval_warmup_observations: true
 scene:
   num_envs: 10
   env_spacing: 7

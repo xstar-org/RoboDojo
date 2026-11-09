@@ -263,7 +263,7 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 self.render()
             for idx in range(200):
                 self.sim_step()
-                if idx % 5 == 0 and self.sim_config.get("capture_eval_warmup_observations", True):
+                if idx % 5 == 0:
                     self.obs_manager.render_for_capture()
                     self.obs_manager.get_obs()
             if self.physx_monitor_enabled:

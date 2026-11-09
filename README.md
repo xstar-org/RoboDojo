@@ -63,15 +63,6 @@ XPolicyLab/            policy server and policy integrations
 Assets/                downloaded robot, object, material, and layout assets
 ```
 
-## Evaluation warmup observations
-
-`env_cfg/sim/sim_config.yml` enables `capture_eval_warmup_observations` by
-default, preserving the existing evaluation startup behavior. Set it to `false`
-to skip discarded observation captures during the 200-step settling loop.
-This keeps scene stability checks, settling physics steps and later policy
-observations unchanged. Validate camera readiness for your runtime before using
-this option in an evaluation.
-
 ## Isaac Sim 6.0 rigid-task compatibility
 
 The simulator client also supports the pinned Isaac Lab submodule (`afca7b0`,
