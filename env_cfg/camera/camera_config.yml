@@ -1,3 +1,5 @@
+# Use "independent" to create one fixed render product per environment and camera.
+render_product_backend: tiled
 annotator:
   common:
     enabled: True

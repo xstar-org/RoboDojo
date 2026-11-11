@@ -146,6 +146,7 @@ class CameraView(XFormPrim):
                          /World/Env1/Camera, /World/Env2/Camera..etc. Additionally a list of regex can be provided.
         camera_resolution: Resolution of each sensor (width, height).
         output_annotators: Annotator/sensor types to configure.
+        use_tiled_product: Create a tiled product by default. Set False for a single independent camera.
         name (str, optional): Shortname to be used as a key by Scene class.
                               Note: needs to be unique if the object is added to the Scene.
         positions Default positions in the world frame of the prim. Shape is (N, 3).
@@ -180,6 +181,7 @@ class CameraView(XFormPrim):
         scales: np.ndarray | torch.Tensor | wp.array | None = None,
         visibilities: np.ndarray | torch.Tensor | wp.array | None = None,
         reset_xform_properties: bool = True,
+        use_tiled_product: bool = True,
     ):
         XFormPrim.__init__(
             self,
@@ -195,6 +197,7 @@ class CameraView(XFormPrim):
         self._output_annotators = output_annotators
         self._annotators = dict()
         self.camera_resolution = camera_resolution
+        self._use_tiled_product = use_tiled_product
         self._render_product = None
         self._setup_tiled_sensor()
 
@@ -239,11 +242,18 @@ class CameraView(XFormPrim):
         self._clean_up_tiled_sensor()
 
         self.tiled_resolution = self._get_tiled_resolution(len(self.prims), self.camera_resolution)
-        self._render_product = rep.create.render_product_tiled(
-            cameras=self.prim_paths,
-            tile_resolution=self.camera_resolution,
-            name=f"{self.name}_tiled_sensor",
-        )
+        if self._use_tiled_product:
+            self._render_product = rep.create.render_product_tiled(
+                cameras=self.prim_paths,
+                tile_resolution=self.camera_resolution,
+                name=f"{self.name}_tiled_sensor",
+            )
+        else:
+            if len(self.prim_paths) != 1:
+                raise ValueError("An independent render product requires exactly one camera")
+            self._render_product = rep.create.render_product(
+                self.prim_paths[0], resolution=self.camera_resolution, force_new=True, name=self.name
+            )
         # define the annotators based on defined types
         self._render_product_path = self._render_product.path
         for annotator_type in self._output_annotators:

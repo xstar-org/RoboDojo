@@ -30,11 +30,15 @@ class TiledCaptureManager:
     ):
         self.sim: IsaacRLEnv = None
         self.config = config
+        backend = config.get("render_product_backend", "tiled")
+        if backend not in ("tiled", "independent"):
+            raise ValueError(f"Unsupported camera render product backend: {backend!r}")
+        self._independent_products = backend == "independent"
         self.camera_manager = camera_manager
         self.num_envs = num_envs
         # Sim6 retargeting the shared tiled product produces near-white wrist
         # views. Keep one product per camera type; retain Sim5's proven path.
-        self._separate_products = num_envs > 1 and is_sim6()
+        self._separate_products = self._independent_products or (num_envs > 1 and is_sim6())
         self.device = device
         self.tiled_render_products: List[str] = []  # all the render products
         self.annotator: List[
@@ -123,6 +127,24 @@ class TiledCaptureManager:
                     type_annotator = annotator_setting["type"]
                     self.annotator_type[cam_id].append(type_annotator)
             prim_paths_by_cam_id = [row[cam_id] for row in self.camera_prim_paths]
+            if self._independent_products:
+                try:
+                    for env_id, path in enumerate(prim_paths_by_cam_id):
+                        view = CameraView(
+                            [path],
+                            name=f"camera_{cam_id}_env_{env_id}",
+                            camera_resolution=self.cameras[env_id][cam_id]._resolution,
+                            output_annotators=self.annotator_type[cam_id],
+                            reset_xform_properties=False,
+                            use_tiled_product=False,
+                        )
+                        self.tiled_cameras.append(view)
+                        self.tiled_render_products.append(view._render_product)
+                        view._render_product.hydra_texture.set_updates_enabled(True)
+                except Exception:
+                    self._release_tiled_cameras()
+                    raise
+                continue
 
             camera_resolution = self.cameras[0][cam_id]._resolution
             height, width = camera_resolution[1], camera_resolution[0]
@@ -228,6 +250,14 @@ class TiledCaptureManager:
             annotator_names = self.annotator_type[cam_id]
             view_id = 0 if self.num_envs > 1 and not self._separate_products else cam_id
             for annotator_name in annotator_names:
+                if self._independent_products:
+                    env_list = []
+                    for env_id in env_ids:
+                        view = self.tiled_cameras[cam_id * self.num_envs + env_id]
+                        pixels, info = view.get_data(annotator_name)
+                        env_list.append({"data": pixels.numpy()[0].copy(), "info": info})
+                    cam_data[annotator_name] = env_list
+                    continue
                 pre_allocated_out = None
                 if view_id in self._output_buffers and annotator_name in self._output_buffers[view_id]:
                     pre_allocated_out = self._output_buffers[view_id][annotator_name]
