@@ -129,20 +129,6 @@ KIT_ARGS=""
 for ext in "${KIT_ENABLE_EXTS[@]}"; do
   KIT_ARGS+=" --enable ${ext}"
 done
-# Kit must select Path Tracing before scene startup as well as in the render config.
-render_mode="$(python3 -c '
-import sys
-import yaml
-
-with open(sys.argv[1], encoding="utf-8") as stream:
-    render = yaml.safe_load(stream).get("render") or {}
-settings = render.get("carb_settings") or {}
-print(settings.get("/rtx/rendermode", ""))
-' "$sim_cfg_file")"
-if [[ "$render_mode" == PathTracing ]]; then
-  KIT_ARGS+=" --/rtx/rendermode=PathTracing"
-fi
-
 # Generated once per eval invocation. Carries the same identity through
 # os.execv inside main.py and bash-level retries below. Append $$ to
 # defuse same-second collisions when the same task/config is launched

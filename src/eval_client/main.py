@@ -127,9 +127,11 @@ if enable_monitor:
     get_monitor().start(enabled=True)
 
 # Camera frames must not lag physics: make each Kit update wait for its frame.
-from env.camera_manager.capture.render_sync import add_zero_delay_kit_args
+# The render mode must equally be selected before the app starts.
+from env.camera_manager.capture.render_sync import add_render_mode_kit_args, add_zero_delay_kit_args
 
 add_zero_delay_kit_args(args_cli)
+add_render_mode_kit_args(args_cli, args_cli.env_cfg_type)
 if IS_SIM6:
     configure_sim6_app(args_cli)
 
