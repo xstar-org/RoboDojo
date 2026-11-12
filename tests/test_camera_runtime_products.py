@@ -1,13 +1,13 @@
 """Exercise actual camera-manager methods with SDK resource doubles."""
 import ast
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 from typing import List
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "env/camera_manager/capture/tiled_capture_manager.py"
@@ -17,7 +17,7 @@ class Config(dict):
     __getattr__ = dict.__getitem__
 
 
-def manager(sim6):
+def manager(sim6, backend="tiled"):
     tree = ast.parse(SOURCE.read_text())
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef))
     methods = [n for n in cls.body if isinstance(n, ast.FunctionDef)]
@@ -46,7 +46,8 @@ def manager(sim6):
     exec(compile(ast.fix_missing_locations(module), str(SOURCE), "exec"), namespace)
     cameras = [[SimpleNamespace(prim_path=f"/env{e}/cam{c}", _resolution=(640, 480)) for c in range(3)] for e in range(2)]
     camera_manager = SimpleNamespace(cameras=cameras, camera_names=[["head", "left", "right"] for _ in range(2)])
-    cfg = Config(annotator={"common": {"enabled": True, "rgb_capture": {"type": "rgb"}}})
+    cfg = Config(render_product_backend=backend,
+                 annotator={"common": {"enabled": True, "rgb_capture": {"type": "rgb"}}})
     instance = namespace["Manager"](2, cfg, camera_manager, "cpu")
     instance.num_cams = 3
     instance._release_tiled_cameras = lambda: instance.tiled_cameras.clear()
@@ -56,6 +57,28 @@ def manager(sim6):
 
 
 class CameraRuntimeTests(unittest.TestCase):
+    def test_camera_creation_skips_owner_product_update_option(self):
+        source = SOURCE.parent.parent / "camera_manager.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        camera_manager = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+        create_cameras = next(node for node in camera_manager.body
+                              if isinstance(node, ast.FunctionDef) and node.name == "create_cameras")
+        original = Config(isolated_owner_products_only=True, cam_head={"camera": {"mount_link": "link"}})
+        manager = SimpleNamespace(num_envs=1, init_config=original, cameras=[], cameras_xform_path=[],
+                                  cameras_xform=[], action_noise=[], camera_names=[])
+        lookup = Mock(side_effect=RuntimeError("camera creation reached"))
+        def create_config(value):
+            return Config({key: create_config(item) if isinstance(item, dict) else item for key, item in value.items()})
+
+        namespace = dict(deepcopy=deepcopy, OmegaConf=SimpleNamespace(to_container=lambda c, **kw: dict(c),
+                                                                   create=create_config),
+                         find_unique_string_name=lookup)
+        exec(compile(ast.Module(body=[create_cameras], type_ignores=[]), str(source), "exec"), namespace)
+        with self.assertRaisesRegex(RuntimeError, "camera creation reached"):
+            namespace["create_cameras"](manager)
+        self.assertEqual(manager.camera_names, [["cam_head"]])
+        self.assertTrue(original.isolated_owner_products_only)
+
     def test_sim5_reuses_one_product_and_sim6_keeps_three_distinct_views(self):
         spec = SimpleNamespace(ANNOTATOR_SPEC={"rgb": {"channels": 4, "dtype": "uint8"}})
         warp = SimpleNamespace(zeros=lambda shape, **kw: shape)
@@ -89,6 +112,58 @@ class CameraRuntimeTests(unittest.TestCase):
         with patch.dict(sys.modules, {sync.__name__: sync}):
             with self.assertRaisesRegex(RuntimeError, "Physics advanced"):
                 m.step()
+
+    def test_isolated_capture_preserves_order_and_restores_visibility_on_error(self):
+        m, _, events, context = manager(True, "independent_isolated")
+        active = []
+        product_updates = [True] * 6
+        m._isolate_product_updates = True
+        m.tiled_render_products = [
+            SimpleNamespace(hydra_texture=SimpleNamespace(
+                set_updates_enabled=lambda enabled, index=index: product_updates.__setitem__(index, enabled)
+            ))
+            for index in range(6)
+        ]
+
+        @contextmanager
+        def only(owner):
+            active.append(owner)
+            try:
+                yield
+            finally:
+                active.pop()
+
+        def read(env_ids, cam_ids):
+            self.assertEqual(active, env_ids)
+            self.assertEqual(product_updates, [index % 2 == env_ids[0] for index in range(6)])
+            return [{"rgb": [(camera, env_ids[0])]} for camera in cam_ids]
+
+        visibility = ModuleType("env.camera_manager.capture.environment_visibility")
+        visibility.EnvironmentVisibility = lambda *args: SimpleNamespace(only=only)
+        sync = ModuleType("env.camera_manager.capture.render_sync")
+        sync.wait_for_latest_cameras = lambda ctx, **kw: events.append((ctx, kw, list(active)))
+        usd = ModuleType("omni.usd")
+        usd.get_context = lambda: SimpleNamespace(get_stage=lambda: "stage")
+        omni = ModuleType("omni")
+        omni.usd = usd
+        modules = {module.__name__: module for module in (omni, usd, visibility, sync)}
+        with patch.dict(sys.modules, modules):
+            m._read_camera = read
+            result = m.step(env_ids=[1, 0], cam_ids=[2, 0])
+            self.assertEqual(result, [{"rgb": [(2, 1), (2, 0)]}, {"rgb": [(0, 1), (0, 0)]}])
+            self.assertEqual(events, [(context, {"min_passes": 2}, [1]),
+                                      (context, {"min_passes": 2}, [0])])
+            self.assertEqual(active, [])
+            self.assertEqual(product_updates, [True] * 6)
+
+            def fail(**kwargs):
+                raise RuntimeError("annotator error")
+
+            m._read_camera = fail
+            with self.assertRaisesRegex(RuntimeError, "annotator error"):
+                m.step(env_ids=[1], cam_ids=[2])
+            self.assertEqual(active, [])
+            self.assertEqual(product_updates, [True] * 6)
 
     def test_sim5_still_retargets_and_waits_for_each_camera_type(self):
         m, _, events, _ = manager(False)
