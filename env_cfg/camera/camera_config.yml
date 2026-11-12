@@ -1,5 +1,8 @@
 # Use "independent" to create one fixed render product per environment and camera.
+# Use "independent_isolated" on Isaac Sim 6 to capture one visible environment at a time.
 render_product_backend: tiled
+# For independent_isolated, update only the active environment's products during its capture.
+isolated_owner_products_only: false
 annotator:
   common:
     enabled: True
