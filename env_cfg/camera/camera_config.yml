@@ -1,8 +1,13 @@
 # Use "independent" to create one fixed render product per environment and camera.
-# Use "independent_isolated" on Isaac Sim 6 to capture one visible environment at a time.
+# Use "independent_isolated" to capture one visible environment at a time.
+# Sim5 isolation is experimental pending native-task GPU validation.
 render_product_backend: tiled
 # For independent_isolated, update only the active environment's products during its capture.
 isolated_owner_products_only: false
+# Delivered frames per multi-env capture (per view on the shared Sim5 path).
+# 2 preserves PR26. 1 is experimental: validate RGB, motion and throughput
+# against the SAME runtime's 1-env reference before using it for evaluation.
+multi_env_capture_render_passes: 2
 annotator:
   common:
     enabled: True

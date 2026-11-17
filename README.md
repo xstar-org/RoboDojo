@@ -218,6 +218,8 @@ model inputs, dtype or physics step count. `env.usd_writeback_stats` records
 control groups that deferred or published transforms when the option is used.
 ### Camera resource lifetime
 
+For RTX 4090 deployments, see the [baseline audit and experimental Sim 5 acceptance protocol](docs/4090-evaluation.md).
+
 Camera resets explicitly detach old annotators and destroy their owned render
 products before creating replacements. Closing the capture manager uses the
 same idempotent release path. Camera resolution, projection, frame delivery,

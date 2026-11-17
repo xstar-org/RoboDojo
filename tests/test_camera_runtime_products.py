@@ -17,7 +17,7 @@ class Config(dict):
     __getattr__ = dict.__getitem__
 
 
-def manager(sim6, backend="tiled"):
+def manager(sim6, backend="tiled", capture_passes=2):
     tree = ast.parse(SOURCE.read_text())
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef))
     methods = [n for n in cls.body if isinstance(n, ast.FunctionDef)]
@@ -37,7 +37,7 @@ def manager(sim6, backend="tiled"):
         views.append(view)
         return view
 
-    namespace = dict(List=List, DictConfig=object, CameraManager=object,
+    namespace = dict(List=List, DictConfig=object, CameraManager=object, IsaacRLEnv=object,
                      torch=SimpleNamespace(device=object), deepcopy=deepcopy,
                      is_sim6=lambda: sim6, CameraView=create_view,
                      OmegaConf=SimpleNamespace(to_container=lambda c, **kw: dict(c), create=Config))
@@ -47,6 +47,7 @@ def manager(sim6, backend="tiled"):
     cameras = [[SimpleNamespace(prim_path=f"/env{e}/cam{c}", _resolution=(640, 480)) for c in range(3)] for e in range(2)]
     camera_manager = SimpleNamespace(cameras=cameras, camera_names=[["head", "left", "right"] for _ in range(2)])
     cfg = Config(render_product_backend=backend,
+                 multi_env_capture_render_passes=capture_passes,
                  annotator={"common": {"enabled": True, "rgb_capture": {"type": "rgb"}}})
     instance = namespace["Manager"](2, cfg, camera_manager, "cpu")
     instance.num_cams = 3
@@ -63,7 +64,8 @@ class CameraRuntimeTests(unittest.TestCase):
         camera_manager = next(node for node in tree.body if isinstance(node, ast.ClassDef))
         create_cameras = next(node for node in camera_manager.body
                               if isinstance(node, ast.FunctionDef) and node.name == "create_cameras")
-        original = Config(isolated_owner_products_only=True, cam_head={"camera": {"mount_link": "link"}})
+        original = Config(isolated_owner_products_only=True, multi_env_capture_render_passes=1,
+                          cam_head={"camera": {"mount_link": "link"}})
         manager = SimpleNamespace(num_envs=1, init_config=original, cameras=[], cameras_xform_path=[],
                                   cameras_xform=[], action_noise=[], camera_names=[])
         lookup = Mock(side_effect=RuntimeError("camera creation reached"))
@@ -113,8 +115,31 @@ class CameraRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Physics advanced"):
                 m.step()
 
+    def test_configured_delivery_budget_reaches_fixed_products_on_both_runtimes(self):
+        for sim6 in (False, True):
+            with self.subTest(sim6=sim6):
+                m, _, events, context = manager(sim6, "independent", capture_passes=1)
+                m._read_camera = lambda **kw: ["current"]
+                sync = ModuleType("env.camera_manager.capture.render_sync")
+                sync.wait_for_latest_cameras = lambda ctx, **kw: events.append(kw)
+                with patch.dict(sys.modules, {sync.__name__: sync}):
+                    self.assertEqual(m.step(), ["current"])
+                self.assertEqual(events, [{"min_passes": 1}])
+                self.assertEqual(context.current_time, 1)
+
+    def test_invalid_delivery_budget_is_rejected_before_sdk_resource_creation(self):
+        for value in (0, -1, 1.5, True, "1"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "positive integer"):
+                manager(False, capture_passes=value)
+
     def test_isolated_capture_preserves_order_and_restores_visibility_on_error(self):
-        m, _, events, context = manager(True, "independent_isolated")
+        self.check_isolated_capture(sim6=True, passes=2)
+
+    def test_sim5_isolation_uses_requested_delivery_budget(self):
+        self.check_isolated_capture(sim6=False, passes=1)
+
+    def check_isolated_capture(self, sim6, passes):
+        m, _, events, context = manager(sim6, "independent_isolated", capture_passes=passes)
         active = []
         product_updates = [True] * 6
         m._isolate_product_updates = True
@@ -151,8 +176,8 @@ class CameraRuntimeTests(unittest.TestCase):
             m._read_camera = read
             result = m.step(env_ids=[1, 0], cam_ids=[2, 0])
             self.assertEqual(result, [{"rgb": [(2, 1), (2, 0)]}, {"rgb": [(0, 1), (0, 0)]}])
-            self.assertEqual(events, [(context, {"min_passes": 2}, [1]),
-                                      (context, {"min_passes": 2}, [0])])
+            self.assertEqual(events, [(context, {"min_passes": passes}, [1]),
+                                      (context, {"min_passes": passes}, [0])])
             self.assertEqual(active, [])
             self.assertEqual(product_updates, [True] * 6)
 
