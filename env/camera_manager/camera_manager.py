@@ -179,6 +179,7 @@ class CameraManager:
                 config.pop("enable_tiled")
             config.pop("render_product_backend", None)
             config.pop("isolated_owner_products_only", None)
+            config.pop("multi_env_capture_render_passes", None)
             if "colorize_depth" in config:
                 self.colorize_depth = config.pop("colorize_depth")
             if "default_frequency" in config:

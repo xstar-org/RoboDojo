@@ -5,6 +5,9 @@ scene:
   num_envs: 10
   env_spacing: 7
 
+# Capture the last N reset warmup observations, keeping all physics steps.
+eval_reset_capture_count: 40
+
 # Defer intermediate CPU physics USD writes until the final control step.
 # Unsupported backends/tasks retain their original writeback behavior.
 defer_usd_writeback: false

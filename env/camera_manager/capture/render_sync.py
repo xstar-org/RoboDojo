@@ -192,4 +192,9 @@ def wait_for_latest_cameras(
         last_stamp = stamp
         if delivered >= required:
             break
+    if delivered < required:
+        raise RuntimeError(
+            f"Camera delivery timed out after {passes} renders: "
+            f"received {delivered} of {required} required frames"
+        )
     return passes

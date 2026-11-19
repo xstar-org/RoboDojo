@@ -3,9 +3,10 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace as NS, MethodType
 import numpy as np
+from env.environment.usd_writeback import deferred_usd_writeback
 R=Path(os.environ.get('CODEX_IK_REPO',str(Path(__file__).resolve().parents[1])))
 node=next(n for n in ast.walk(ast.parse((R/'src/eval_client/eval_env.py').read_text(encoding='utf-8')))if isinstance(n,ast.FunctionDef)and n.name=='take_action_batch')
-ns=dict(os=os,np=np,deepcopy=deepcopy)
+ns=dict(os=os,np=np,deepcopy=deepcopy,deferred_usd_writeback=deferred_usd_writeback)
 exec(compile(ast.Module(body=[node],type_ignores=[]),'actual_frozen_take_action_batch','exec'),ns)
 run=ns['take_action_batch']
 manager_node=next(n for n in ast.walk(ast.parse((R/'env/robot_manager/robot_manager.py').read_text(encoding='utf-8')))if isinstance(n,ast.FunctionDef)and n.name=='solve_ik_batch')
@@ -24,6 +25,7 @@ def fixture(n=3):
         manager.num_envs=n
         manager.solve_ik_batch=MethodType(manager_batch,manager)
     env=NS(physx_monitor_enabled=False,num_envs=n,robot_manager=manager,take_action_cnt=[0]*n,step_lim=800,end_flag=[False]*n,validate_action_dict=lambda a:None,get_action_type=lambda a:'joint'if'left_arm_joint_state'in a else'ee',process_control_info=process,have_empty=lambda ids:True,reward_manager=NS(step=lambda**kw:None),is_episode_end=lambda:None)
+    env.sim_config = {}
     actions=[dict(left_ee_pose=[i+1]*7,right_ee_pose=[i+101]*7,left_ee_joint_state=[.5],right_ee_joint_state=[.5])for i in range(n)]
     return env,actions,calls,controls
 class Dispatch(unittest.TestCase):

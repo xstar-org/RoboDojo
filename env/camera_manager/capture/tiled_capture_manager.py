@@ -36,8 +36,11 @@ class TiledCaptureManager:
         self._independent_products = backend in ("independent", "independent_isolated")
         self._isolate_environments = backend == "independent_isolated" and num_envs > 1
         self._isolate_product_updates = self._isolate_environments and config.get("isolated_owner_products_only", False)
-        if self._isolate_environments and not is_sim6():
-            raise ValueError("Independent environment isolation requires Isaac Sim 6")
+        # Keep the validated two-delivery protocol by default. One delivery is
+        # an opt-in benchmark candidate, not a claim of image convergence.
+        self._capture_passes = config.get("multi_env_capture_render_passes", 2)
+        if type(self._capture_passes) is not int or self._capture_passes < 1:
+            raise ValueError("multi_env_capture_render_passes must be a positive integer")
         self.camera_manager = camera_manager
         self.num_envs = num_envs
         # Sim6 retargeting the shared tiled product produces near-white wrist
@@ -208,7 +211,7 @@ class TiledCaptureManager:
         if self._separate_products:
             context = self.sim.sim
             start_time = context.current_time
-            wait_for_latest_cameras(context, min_passes=2)
+            wait_for_latest_cameras(context, min_passes=self._capture_passes)
             data = self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
             if context.current_time != start_time:
                 raise RuntimeError("Physics advanced during camera capture")
@@ -228,7 +231,7 @@ class TiledCaptureManager:
             paths = [row[cam_id] for row in self.camera_prim_paths]
             with Usd.EditContext(stage, stage.GetSessionLayer()):
                 product.GetRelationship("camera").SetTargets(paths)
-            wait_for_latest_cameras(context, min_passes=2)
+            wait_for_latest_cameras(context, min_passes=self._capture_passes)
             data.extend(self._read_camera(env_ids=env_ids, cam_ids=[cam_id]))
         if context.current_time != start_time:
             raise RuntimeError("Physics advanced during sequential camera capture")
@@ -257,7 +260,7 @@ class TiledCaptureManager:
                 with visibility.only(env_id):
                     if self._isolate_product_updates:
                         self._set_updating_product_owner(env_id)
-                    wait_for_latest_cameras(context, min_passes=2)
+                    wait_for_latest_cameras(context, min_passes=self._capture_passes)
                     sample = self._read_camera(env_ids=[env_id], cam_ids=cam_ids)
                 if context.current_time != start_time:
                     raise RuntimeError("Physics advanced during isolated camera capture")
