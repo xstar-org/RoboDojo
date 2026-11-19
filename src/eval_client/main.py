@@ -129,6 +129,10 @@ add_zero_delay_kit_args(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+from src.eval_client.asset_mirror import install_asset_mirror
+
+install_asset_mirror()
+
 from omegaconf import OmegaConf
 
 from env.global_configs import *
