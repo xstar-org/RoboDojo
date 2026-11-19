@@ -6,6 +6,7 @@ import json
 import os
 
 from client_server.ws.model_client import WsModelClient
+from src.eval_client.policy_timeout import policy_request_timeout
 import numpy as np
 import transforms3d as t3d
 import websockets
@@ -193,6 +194,7 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                 repeat_index=self.deploy_cfg.get("repeat_index"),
                 ws_ping_interval_s=self.deploy_cfg.get("ws_ping_interval_s", 20.0),
                 ws_ping_timeout_s=self.deploy_cfg.get("ws_ping_timeout_s", 20.0),
+                request_timeout_s=policy_request_timeout(self.deploy_cfg),
             )
             self.robot_action_dim_info = get_robot_action_dim_info(env_cfg=self.eval_cfg)
 
