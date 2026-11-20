@@ -21,6 +21,10 @@ parser.add_argument("--num_envs", type=int, default=1, help="Number of environme
 parser.add_argument("--batch_cpu_controls", action="store_true",
                     help="Batch gripper reads and control targets for CPU multi-environment evaluation.")
 parser.add_argument(
+    "--defer_usd_writeback", action="store_true",
+    help="Defer intermediate CPU physics USD writes when the task supports it.",
+)
+parser.add_argument(
     "--env_cfg_type",
     type=str,
     required=True,
@@ -336,6 +340,8 @@ def main():
     OmegaConf.update(env_cfg, "eval_cfg.num_envs", num_envs, force_add=True)
     if args_cli.batch_cpu_controls:
         env_cfg.eval_cfg.batch_cpu_controls = True
+    if args_cli.defer_usd_writeback:
+        env_cfg.sim.defer_usd_writeback = True
     env_cfg = process_randomization(env_cfg)
     env_cfg, eval_num = process_config(env_cfg, task_name=task_name)
 

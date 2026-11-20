@@ -27,12 +27,17 @@ host="localhost"
 protocol=""
 policy_server_url=""
 batch_cpu_controls=false
+defer_usd_writeback=false
 extra_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --batch_cpu_controls)
       batch_cpu_controls=true
+      shift
+      ;;
+    --defer_usd_writeback)
+      defer_usd_writeback=true
       shift
       ;;
     --root_dir|--task_name|--env_cfg_type|--device_id|--policy_name|--port|--eval_batch|--additional_info|--seed|--host|--protocol|--policy_server_url)
@@ -126,6 +131,9 @@ echo "[INFO] num_envs        = ${num_envs}"
 extra_args=()
 if [[ "$batch_cpu_controls" == true ]]; then
   extra_args+=(--batch_cpu_controls)
+fi
+if [[ "$defer_usd_writeback" == true ]]; then
+  extra_args+=(--defer_usd_writeback)
 fi
 
 KIT_ENABLE_EXTS=(
