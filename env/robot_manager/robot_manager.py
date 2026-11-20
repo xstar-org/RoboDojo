@@ -392,13 +392,12 @@ class RobotManager:
     def batch_control_gripper_reads(self, env_idx_list):
         # Each scope ends before the next physics tick. Do not reuse gripper
         # state across queue processing, target dispatch, or articulation updates.
-        previous = self._control_gripper_snapshot
         env_ids = list(range(self.num_envs) if env_idx_list is None else env_idx_list)
         self._control_gripper_snapshot = (env_ids, {})
         try:
             yield
         finally:
-            self._control_gripper_snapshot = previous
+            self._control_gripper_snapshot = None
 
     def _dispatch_batched_cpu_controls(self, meta_controls, env_ids):
         with self.batch_control_gripper_reads(env_ids):
