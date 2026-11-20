@@ -57,6 +57,9 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
             self.config_name = self.eval_cfg.get("config_name", None)
             self.task_name = self.eval_cfg.get("task_name", None)
             self.eval_batch = self.eval_cfg.get("eval_batch", False)
+            self.robot_manager.batch_cpu_controls = bool(
+                self.eval_batch and self.eval_cfg.get("batch_cpu_controls", False)
+            )
             self.eval_num = int(self.eval_cfg.get("eval_num", 50))
             self.policy_name = self.eval_cfg.get("policy_name", None)
             self.additional_info = self.eval_cfg.get("additional_info", "")
@@ -656,7 +659,12 @@ def create_eval_env(config, app, resume_state=None, **kwargs):
                     )
 
         def step(self, env_idx_list, decimation=1):
-            meta_control_list = self.robot_manager.control_manager.pop(env_idx_list)
+            manager = self.robot_manager
+            if manager.use_batched_cpu_controls:
+                with manager.batch_control_gripper_reads(env_idx_list):
+                    meta_control_list = manager.control_manager.pop(env_idx_list)
+            else:
+                meta_control_list = manager.control_manager.pop(env_idx_list)
             for _ in range(decimation):
                 super().step(meta_control_list=meta_control_list)
                 self.sim_step(render=False)

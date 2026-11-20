@@ -26,10 +26,15 @@ seed=""
 host="localhost"
 protocol=""
 policy_server_url=""
+batch_cpu_controls=false
 extra_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --batch_cpu_controls)
+      batch_cpu_controls=true
+      shift
+      ;;
     --root_dir|--task_name|--env_cfg_type|--device_id|--policy_name|--port|--eval_batch|--additional_info|--seed|--host|--protocol|--policy_server_url)
       if [[ $# -lt 2 || "$2" == --* ]]; then
         echo "[ERROR] Missing value for argument: $1"
@@ -119,6 +124,9 @@ echo "[INFO] render_interval = ${render_interval}"
 echo "[INFO] num_envs        = ${num_envs}"
 
 extra_args=()
+if [[ "$batch_cpu_controls" == true ]]; then
+  extra_args+=(--batch_cpu_controls)
+fi
 
 KIT_ENABLE_EXTS=(
   "isaacsim.replicator.behavior"

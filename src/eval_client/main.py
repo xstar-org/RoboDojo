@@ -18,6 +18,8 @@ MAX_INPROC_RESTARTS = 3
 parser = argparse.ArgumentParser()
 parser.add_argument("--task_name", type=str)
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+parser.add_argument("--batch_cpu_controls", action="store_true",
+                    help="Batch gripper reads and control targets for CPU multi-environment evaluation.")
 parser.add_argument(
     "--env_cfg_type",
     type=str,
@@ -332,6 +334,8 @@ def main():
     eval_cfg["num_envs"] = num_envs
     OmegaConf.update(env_cfg, "sim.scene.num_envs", num_envs, force_add=True)
     OmegaConf.update(env_cfg, "eval_cfg.num_envs", num_envs, force_add=True)
+    if args_cli.batch_cpu_controls:
+        env_cfg.eval_cfg.batch_cpu_controls = True
     env_cfg = process_randomization(env_cfg)
     env_cfg, eval_num = process_config(env_cfg, task_name=task_name)
 
