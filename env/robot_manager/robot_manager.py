@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from contextlib import contextmanager
 from copy import deepcopy
 from importlib import import_module
 from typing import List, Literal
@@ -27,6 +28,8 @@ class RobotManager:
         device,
     ):
         self.sim: IsaacRLEnv = None
+        self.batch_cpu_controls = False
+        self._control_gripper_snapshot = None
         self.control_manager = ControlManager(num_envs=num_envs, robot_manager=self)
         self.num_envs = num_envs
         self.env_spacing = env_spacing
@@ -186,6 +189,20 @@ class RobotManager:
         return results
 
     def get_end_effector_real_val(self, robot, env_idx_list=None):
+        snapshot = self._control_gripper_snapshot
+        if snapshot is not None and env_idx_list is not None and len(env_idx_list) == 1:
+            env_ids, by_robot = snapshot
+            env_idx = env_idx_list[0]
+            if env_idx in env_ids:
+                robot_id = id(robot)
+                if robot_id not in by_robot:
+                    articulation = self.robot_key[self.robot_list.index(robot)]
+                    rows = articulation.data.joint_pos[env_ids][:, robot.gripper_joint_indices].cpu().numpy()
+                    by_robot[robot_id] = dict(zip(env_ids, rows, strict=True))
+                result = dict.fromkeys(range(self.num_envs))
+                result[env_idx] = by_robot[robot_id][env_idx].copy()
+                return result
+
         if env_idx_list is None:
             env_idx_list = list(range(self.num_envs))
 
@@ -367,6 +384,45 @@ class RobotManager:
         else:
             return processed_name
 
+    @property
+    def use_batched_cpu_controls(self):
+        return self.batch_cpu_controls and self.num_envs > 1 and str(self.sim.sim.device) == "cpu"
+
+    @contextmanager
+    def batch_control_gripper_reads(self, env_idx_list):
+        # Each scope ends before the next physics tick. Do not reuse gripper
+        # state across queue processing, target dispatch, or articulation updates.
+        env_ids = list(range(self.num_envs) if env_idx_list is None else env_idx_list)
+        self._control_gripper_snapshot = (env_ids, {})
+        try:
+            yield
+        finally:
+            self._control_gripper_snapshot = None
+
+    def _dispatch_batched_cpu_controls(self, meta_controls, env_ids):
+        with self.batch_control_gripper_reads(env_ids):
+            actions = [meta_controls[index].get_action(self, env_idx=index) for index in env_ids]
+        env_indices = torch.tensor(env_ids, dtype=torch.int32, device="cpu")
+        for robot in self.robot_list:
+            if robot.robot_type != "arm":
+                continue
+            arm = self.robot_key[self.robot_list.index(robot)]
+            arm_name = self.process_name(robot.arm_name)
+            gripper_name = self.process_name(robot.gripper_name)
+            arm_position = np.empty((len(env_ids), len(robot.arm_joint_indices)), dtype=np.float32)
+            arm_velocity = np.empty_like(arm_position)
+            gripper_position = np.empty((len(env_ids), len(robot.gripper_joint_indices)), dtype=np.float32)
+            for row, action in enumerate(actions):
+                arm_position[row] = action[arm_name]["position"]
+                arm_velocity[row] = action[arm_name]["velocity"]
+                gripper_position[row] = action[gripper_name]["position"]
+            arm.set_joint_position_target(
+                torch.from_numpy(arm_position), joint_ids=robot.arm_joint_indices, env_ids=env_indices)
+            arm.set_joint_velocity_target(
+                torch.from_numpy(arm_velocity), joint_ids=robot.arm_joint_indices, env_ids=env_indices)
+            arm.set_joint_position_target(
+                torch.from_numpy(gripper_position), joint_ids=robot.gripper_joint_indices, env_ids=env_indices)
+
     def control_robot(
         self,
         meta_control_list=None,
@@ -379,6 +435,10 @@ class RobotManager:
             if isinstance(meta_control_list[env_idx], MetaControl):
                 plan_num += 1
                 plan_lst.append(env_idx)
+        if (self.use_batched_cpu_controls and plan_lst
+                and all(type(meta_control_list[index]) is MetaControl for index in plan_lst)):
+            self._dispatch_batched_cpu_controls(meta_control_list, plan_lst)
+            return
         for robot in self.robot_list:
             if robot.robot_type == "arm":
                 action_dim = len(robot.arm_joint_indices)
