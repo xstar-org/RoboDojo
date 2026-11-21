@@ -63,6 +63,38 @@ def add_zero_delay_kit_args(args) -> None:
         args.kit_args = (current + " " + " ".join(missing)).strip()
 
 
+def add_render_mode_kit_args(args, env_cfg_type: str, cfg_root: str = "env_cfg") -> None:
+    """Mirror the configured render mode into the Kit startup args.
+
+    The render config applies ``/rtx/rendermode`` after scene startup, but Path
+    Tracing must already be selected while the renderer and the scene start
+    up; switching afterwards leaves a different light solution and breaks
+    cross-run parity. Read the declared mode from the sim config chain
+    (``env_cfg/<type>.yml`` -> ``config.sim`` -> ``env_cfg/sim/<name>.yml`` ->
+    ``render.carb_settings``) and append it to the Kit args. Any read or parse
+    failure leaves the args untouched: the app then starts in the default mode
+    exactly as before.
+    """
+    import os
+
+    import yaml
+
+    try:
+        with open(os.path.join(cfg_root, f"{env_cfg_type}.yml"), encoding="utf-8") as stream:
+            env_cfg = yaml.safe_load(stream) or {}
+        sim_name = (env_cfg.get("config") or {}).get("sim")
+        if not sim_name:
+            return
+        with open(os.path.join(cfg_root, "sim", f"{sim_name}.yml"), encoding="utf-8") as stream:
+            render = (yaml.safe_load(stream) or {}).get("render") or {}
+    except (OSError, yaml.YAMLError):
+        return
+    mode = (render.get("carb_settings") or {}).get("/rtx/rendermode", "")
+    current = getattr(args, "kit_args", None) or ""
+    if mode == "PathTracing" and "--/rtx/rendermode=" not in current:
+        args.kit_args = (current + " --/rtx/rendermode=PathTracing").strip()
+
+
 def zero_delay_active() -> bool:
     """True when the running Kit app has the zero-delay settings applied."""
     try:

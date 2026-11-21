@@ -145,7 +145,6 @@ KIT_ARGS=""
 for ext in "${KIT_ENABLE_EXTS[@]}"; do
   KIT_ARGS+=" --enable ${ext}"
 done
-
 # Generated once per eval invocation. Carries the same identity through
 # os.execv inside main.py and bash-level retries below. Append $$ to
 # defuse same-second collisions when the same task/config is launched

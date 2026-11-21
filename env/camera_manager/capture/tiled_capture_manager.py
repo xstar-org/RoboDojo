@@ -30,11 +30,19 @@ class TiledCaptureManager:
     ):
         self.sim: IsaacRLEnv = None
         self.config = config
+        backend = config.get("render_product_backend", "tiled")
+        if backend not in ("tiled", "independent", "independent_isolated"):
+            raise ValueError(f"Unsupported camera render product backend: {backend!r}")
+        self._independent_products = backend in ("independent", "independent_isolated")
+        self._isolate_environments = backend == "independent_isolated" and num_envs > 1
+        self._isolate_product_updates = self._isolate_environments and config.get("isolated_owner_products_only", False)
+        if self._isolate_environments and not is_sim6():
+            raise ValueError("Independent environment isolation requires Isaac Sim 6")
         self.camera_manager = camera_manager
         self.num_envs = num_envs
         # Sim6 retargeting the shared tiled product produces near-white wrist
         # views. Keep one product per camera type; retain Sim5's proven path.
-        self._separate_products = num_envs > 1 and is_sim6()
+        self._separate_products = self._independent_products or (num_envs > 1 and is_sim6())
         self.device = device
         self.tiled_render_products: List[str] = []  # all the render products
         self.annotator: List[
@@ -123,6 +131,24 @@ class TiledCaptureManager:
                     type_annotator = annotator_setting["type"]
                     self.annotator_type[cam_id].append(type_annotator)
             prim_paths_by_cam_id = [row[cam_id] for row in self.camera_prim_paths]
+            if self._independent_products:
+                try:
+                    for env_id, path in enumerate(prim_paths_by_cam_id):
+                        view = CameraView(
+                            [path],
+                            name=f"camera_{cam_id}_env_{env_id}",
+                            camera_resolution=self.cameras[env_id][cam_id]._resolution,
+                            output_annotators=self.annotator_type[cam_id],
+                            reset_xform_properties=False,
+                            use_tiled_product=False,
+                        )
+                        self.tiled_cameras.append(view)
+                        self.tiled_render_products.append(view._render_product)
+                        view._render_product.hydra_texture.set_updates_enabled(True)
+                except Exception:
+                    self._release_tiled_cameras()
+                    raise
+                continue
 
             camera_resolution = self.cameras[0][cam_id]._resolution
             height, width = camera_resolution[1], camera_resolution[0]
@@ -176,6 +202,9 @@ class TiledCaptureManager:
             return self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
         from env.camera_manager.capture.render_sync import wait_for_latest_cameras
 
+        if self._isolate_environments:
+            return self._capture_isolated_environments(env_ids, cam_ids)
+
         if self._separate_products:
             context = self.sim.sim
             start_time = context.current_time
@@ -205,6 +234,48 @@ class TiledCaptureManager:
             raise RuntimeError("Physics advanced during sequential camera capture")
         return data
 
+    def _capture_isolated_environments(self, env_ids, cam_ids):
+        import omni.usd
+
+        from env.camera_manager.capture.environment_visibility import EnvironmentVisibility
+        from env.camera_manager.capture.render_sync import wait_for_latest_cameras
+
+        env_ids = list(range(self.num_envs)) if env_ids is None else list(env_ids)
+        cam_ids = None if cam_ids is None else list(cam_ids)
+        if not env_ids:
+            return self._read_camera(env_ids=env_ids, cam_ids=cam_ids)
+        if any(env_id < 0 or env_id >= self.num_envs for env_id in env_ids):
+            raise IndexError("Invalid environment ID for isolated camera capture")
+
+        stage = omni.usd.get_context().get_stage()
+        visibility = EnvironmentVisibility(stage, self.num_envs)
+        context = self.sim.sim
+        start_time = context.current_time
+        data = None
+        try:
+            for env_id in env_ids:
+                with visibility.only(env_id):
+                    if self._isolate_product_updates:
+                        self._set_updating_product_owner(env_id)
+                    wait_for_latest_cameras(context, min_passes=2)
+                    sample = self._read_camera(env_ids=[env_id], cam_ids=cam_ids)
+                if context.current_time != start_time:
+                    raise RuntimeError("Physics advanced during isolated camera capture")
+                if data is None:
+                    data = sample
+                else:
+                    for batch, camera in zip(data, sample, strict=True):
+                        for name, frames in camera.items():
+                            batch[name].extend(frames)
+        finally:
+            if self._isolate_product_updates:
+                self._set_updating_product_owner(None)
+        return data
+
+    def _set_updating_product_owner(self, owner):
+        for index, product in enumerate(self.tiled_render_products):
+            product.hydra_texture.set_updates_enabled(owner is None or index % self.num_envs == owner)
+
     def _read_camera(self, env_ids: List[int] = None, cam_ids: List[int] = None) -> List[List[List[any]]]:
         """
         Step the annotator. When env_id and cam_id is given, use the given. Otherwise apply to all cameras.
@@ -228,6 +299,14 @@ class TiledCaptureManager:
             annotator_names = self.annotator_type[cam_id]
             view_id = 0 if self.num_envs > 1 and not self._separate_products else cam_id
             for annotator_name in annotator_names:
+                if self._independent_products:
+                    env_list = []
+                    for env_id in env_ids:
+                        view = self.tiled_cameras[cam_id * self.num_envs + env_id]
+                        pixels, info = view.get_data(annotator_name)
+                        env_list.append({"data": pixels.numpy()[0].copy(), "info": info})
+                    cam_data[annotator_name] = env_list
+                    continue
                 pre_allocated_out = None
                 if view_id in self._output_buffers and annotator_name in self._output_buffers[view_id]:
                     pre_allocated_out = self._output_buffers[view_id][annotator_name]
